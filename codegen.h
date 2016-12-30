@@ -34,7 +34,8 @@ class CodeGenContext {
 
 public:
     Module *module;
-    CodeGenContext() { module = new Module("main", getGlobalContext()); }
+    LLVMContext TheContext;
+    CodeGenContext() { module = new Module("main", TheContext); }
     
     void generateCode(NBlock& root);
     GenericValue runCode();
