@@ -85,7 +85,7 @@ Value* NIdentifier::codeGen(CodeGenContext& context)
         std::cout<<"PPP "<<ident->name<<ident->parent<<"\n";
         if (ident->parent) {
             Value *parentV = value(ident->parent);
-            Value *v = new LoadInst(parentV, "", false, context.currentBlock());
+//             auto *v = new LoadInst(parentV, "", false, context.currentBlock());
             Type *t = parentV->getType();
             t = t->getPointerElementType();
 
@@ -109,7 +109,8 @@ Value* NIdentifier::codeGen(CodeGenContext& context)
                 auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
                 auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id, false));
 
-                return GetElementPtrInst::CreateInBounds(parentV, {id1, id2});
+                return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "bla", context.currentBlock());
+//                  return parentV;
             }
         }
         return context.locals()[ident->name];
@@ -118,7 +119,7 @@ Value* NIdentifier::codeGen(CodeGenContext& context)
     Value *v = value(this);
 
     if (parent) {
-        return v;
+//         return v;
     }
 
 
