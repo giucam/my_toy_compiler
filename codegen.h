@@ -1,4 +1,5 @@
 #include <stack>
+#include <unordered_map>
 #include <typeinfo>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Function.h>
@@ -28,14 +29,22 @@ public:
     std::map<std::string, Value*> locals;
 };
 
+struct Struct {
+    Type *type;
+    std::vector<std::string> fields;
+};
+
 class CodeGenContext {
     std::stack<CodeGenBlock *> blocks;
     Function *mainFunction;
 
 public:
+    std::unordered_map<std::string, Struct> structs;
     Module *module;
     LLVMContext TheContext;
     CodeGenContext() { module = new Module("main", TheContext); }
+
+    Value *findValue(Value *parent, const std::string &name);
     
     void generateCode(NBlock& root);
     GenericValue runCode();

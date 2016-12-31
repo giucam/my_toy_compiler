@@ -1,10 +1,16 @@
-extern void printi(int val)
+extern void printi(val: int)
 
-int do_math(int a) {
-  int x = a * 5
+let do_math(a: int, b: int): int {
+  let x: int = a * 5 + b
   return x + 3
 }
+struct foo {
+    ddd: int
+}
 
-echo(do_math(11))
-echo(do_math(12))
-printi(10)
+let gg: int = 5
+let bla: foo = { 3 }
+
+echo(do_math(bla.ddd, gg))
+//echo(do_math(12))
+//printi(10)

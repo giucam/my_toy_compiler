@@ -39,8 +39,10 @@ public:
 
 class NIdentifier : public NExpression {
 public:
+        const NIdentifier *parent;
 	std::string name;
-	NIdentifier(const std::string& name) : name(name) { }
+	NIdentifier(const std::string& name) : parent(nullptr), name(name) { }
+	NIdentifier(const NIdentifier *p, const std::string &name) : parent(p), name(name) {}
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
@@ -100,11 +102,13 @@ class NVariableDeclaration : public NStatement {
 public:
 	const NIdentifier& type;
 	NIdentifier& id;
-	NExpression *assignmentExpr;
+        ExpressionList expressions;
 	NVariableDeclaration(const NIdentifier& type, NIdentifier& id) :
-		type(type), id(id) { assignmentExpr = NULL; }
+		type(type), id(id) { }
 	NVariableDeclaration(const NIdentifier& type, NIdentifier& id, NExpression *assignmentExpr) :
-		type(type), id(id), assignmentExpr(assignmentExpr) { }
+		type(type), id(id), expressions({ assignmentExpr }) { }
+        NVariableDeclaration(const NIdentifier& type, NIdentifier& id, ExpressionList exprs) :
+		type(type), id(id), expressions(exprs) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
@@ -129,4 +133,13 @@ public:
 			const VariableList& arguments, NBlock& block) :
 		type(type), id(id), arguments(arguments), block(block) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
+};
+
+class NStructDeclaration : public NStatement {
+public:
+    const NIdentifier &id;
+    VariableList elements;
+    NStructDeclaration(const NIdentifier &id, const VariableList &elements) : id(id), elements(elements) {}
+
+    llvm::Value* codeGen(CodeGenContext& context) override;
 };

@@ -49,8 +49,13 @@ static Type *typeOf(const NIdentifier& type, CodeGenContext& context)
 		return Type::getInt64Ty(context.TheContext);
 	}
 	else if (type.name.compare("double") == 0) {
-		return Type::getDoubleTy(context.TheContext);
-	}
+            return Type::getDoubleTy(context.TheContext);
+        } else if (type.name.compare("void") == 0) {
+            return Type::getVoidTy(context.TheContext);
+        } else if (context.structs.find(type.name) != context.structs.end()) {
+            return context.structs[type.name].type;
+        }
+        std::cerr<<"ERROR: no type found: "<< type.name << "\n";
 	return Type::getVoidTy(context.TheContext);
 }
 
@@ -68,14 +73,63 @@ Value* NDouble::codeGen(CodeGenContext& context)
 	return ConstantFP::get(Type::getDoubleTy(context.TheContext), value);
 }
 
+Value *CodeGenContext::findValue(Value *parent, const std::string &name)
+{
+    return locals()[name];
+}
+
 Value* NIdentifier::codeGen(CodeGenContext& context)
 {
+    std::function<Value *(const NIdentifier *)> value = [&context, &value](const NIdentifier *ident) -> Value * {
+
+        std::cout<<"PPP "<<ident->name<<ident->parent<<"\n";
+        if (ident->parent) {
+            Value *parentV = value(ident->parent);
+            Value *v = new LoadInst(parentV, "", false, context.currentBlock());
+            Type *t = parentV->getType();
+            t = t->getPointerElementType();
+
+            t->dump();
+            if (t->isStructTy()) {
+                StructType *st = static_cast<StructType *>(t);
+                Struct &str = context.structs[st->getName()];
+
+                            std::cout<<"    "<<st->getName().str()<<"\n";
+
+                int id = 0;
+                for (int i = 0; i < str.fields.size(); ++i) {
+                    if (str.fields[i] == ident->name) {
+                        id = i;
+                        break;
+                    }
+                }
+
+                std::cout<<"fout id in struct "<<id<<"\n";
+
+                auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
+                auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id, false));
+
+                return GetElementPtrInst::CreateInBounds(parentV, {id1, id2});
+            }
+        }
+        return context.locals()[ident->name];
+    };
+
+    Value *v = value(this);
+
+    if (parent) {
+        return v;
+    }
+
+
 	std::cout << "Creating identifier reference: " << name << endl;
 	if (context.locals().find(name) == context.locals().end()) {
 		std::cerr << "undeclared variable " << name << endl;
-		return NULL;
+//                 exit(1);
+// 		return NULL;
 	}
-	return new LoadInst(context.locals()[name], "", false, context.currentBlock());
+// 	return v;
+	return new LoadInst(v, "", false, context.currentBlock());
 }
 
 Value* NMethodCall::codeGen(CodeGenContext& context)
@@ -154,8 +208,8 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
 	std::cout << "Creating variable declaration " << type.name << " " << id.name << endl;
 	AllocaInst *alloc = new AllocaInst(typeOf(type, context), id.name.c_str(), context.currentBlock());
 	context.locals()[id.name] = alloc;
-	if (assignmentExpr != NULL) {
-		NAssignment assn(id, *assignmentExpr);
+	if (!expressions.empty()) {
+		NAssignment assn(id, *expressions.front());
 		assn.codeGen(context);
 	}
 	return alloc;
@@ -203,4 +257,22 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 	context.popBlock();
 	std::cout << "Creating function: " << id.name << endl;
 	return function;
+}
+
+Value* NStructDeclaration::codeGen(CodeGenContext& context)
+{
+    std::cout << "Creating struct declaration " << " " << id.name << endl;
+    vector<Type *> argTypes;
+    for (auto it = elements.begin(); it != elements.end(); it++) {
+        argTypes.push_back(typeOf((**it).type, context));
+        std::cout<<"    with arg " << (*it)->type.name << " " <<(*it)->id.name<<"\n";
+    }
+    StructType *type = StructType::create(context.TheContext, argTypes, id.name.c_str());
+    Struct &str = context.structs[id.name];
+    str.type = type;
+    str.fields.reserve(elements.size());
+    for (auto &&el: elements) {
+        str.fields.push_back(el->id.name);
+    }
+    return 0;
 }
