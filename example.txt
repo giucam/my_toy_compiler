@@ -1,16 +1,24 @@
-extern void printi(val: int)
+extern void printi(val: i32)
 
-let do_math(a: int, b: int): int {
-  let x: int = a * 5 + b
+
+func do_math(a: i32, b: i32): i32 {
+  let x: i32 = a * 5 + b
   return x + 3
 }
 struct foo {
-    ddd: int
+    ddd: i32;
+    pupu: i32;
 }
 
-let gg: int = 5
-let bla: foo = { 3 }
+let gg = 6
+let bla: foo = { ddd = 3, pupu = gg }
 
-echo(do_math(bla.ddd, gg))
+//bla.pupu=7
+
+let m = do_math(a = bla.ddd, b = bla.pupu)
+//let m = do_math(a = 4, b = 5)
+echo(toPrint = m)
+
+//echo(do_math(bla.ddd, bla.pupu))
 //echo(do_math(12))
 //printi(10)

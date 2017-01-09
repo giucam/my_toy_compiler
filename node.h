@@ -6,10 +6,12 @@ class CodeGenContext;
 class NStatement;
 class NExpression;
 class NVariableDeclaration;
+class NAssignment;
 
 typedef std::vector<NStatement*> StatementList;
 typedef std::vector<NExpression*> ExpressionList;
 typedef std::vector<NVariableDeclaration*> VariableList;
+typedef std::vector<NAssignment *> AssignmentList;
 
 class Node {
 public:
@@ -49,8 +51,8 @@ public:
 class NMethodCall : public NExpression {
 public:
 	const NIdentifier& id;
-	ExpressionList arguments;
-	NMethodCall(const NIdentifier& id, ExpressionList& arguments) :
+	AssignmentList arguments;
+	NMethodCall(const NIdentifier& id, AssignmentList& arguments) :
 		id(id), arguments(arguments) { }
 	NMethodCall(const NIdentifier& id) : id(id) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
@@ -68,9 +70,9 @@ public:
 
 class NAssignment : public NExpression {
 public:
-	NIdentifier& lhs;
+	const NIdentifier& lhs;
 	NExpression& rhs;
-	NAssignment(NIdentifier& lhs, NExpression& rhs) : 
+	NAssignment(const NIdentifier& lhs, NExpression& rhs) :
 		lhs(lhs), rhs(rhs) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
@@ -100,15 +102,16 @@ public:
 
 class NVariableDeclaration : public NStatement {
 public:
-	const NIdentifier& type;
+	const NIdentifier *type;
 	NIdentifier& id;
-        ExpressionList expressions;
-	NVariableDeclaration(const NIdentifier& type, NIdentifier& id) :
+        AssignmentList expressions;
+	NVariableDeclaration(const NIdentifier *type, NIdentifier& id) :
 		type(type), id(id) { }
-	NVariableDeclaration(const NIdentifier& type, NIdentifier& id, NExpression *assignmentExpr) :
+	NVariableDeclaration(const NIdentifier *type, NIdentifier& id, NAssignment *assignmentExpr) :
 		type(type), id(id), expressions({ assignmentExpr }) { }
-        NVariableDeclaration(const NIdentifier& type, NIdentifier& id, ExpressionList exprs) :
+        NVariableDeclaration(const NIdentifier *type, NIdentifier& id, AssignmentList exprs) :
 		type(type), id(id), expressions(exprs) { }
+        NVariableDeclaration(NIdentifier &id, NAssignment *expr) : type(nullptr), id(id), expressions({ expr }) {}
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 

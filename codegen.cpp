@@ -45,8 +45,8 @@ GenericValue CodeGenContext::runCode() {
 /* Returns an LLVM type based on the identifier */
 static Type *typeOf(const NIdentifier& type, CodeGenContext& context)
 {
-	if (type.name.compare("int") == 0) {
-		return Type::getInt64Ty(context.TheContext);
+	if (type.name.compare("i32") == 0) {
+		return Type::getInt32Ty(context.TheContext);
 	}
 	else if (type.name.compare("double") == 0) {
             return Type::getDoubleTy(context.TheContext);
@@ -55,8 +55,49 @@ static Type *typeOf(const NIdentifier& type, CodeGenContext& context)
         } else if (context.structs.find(type.name) != context.structs.end()) {
             return context.structs[type.name].type;
         }
-        std::cerr<<"ERROR: no type found: "<< type.name << "\n";
-	return Type::getVoidTy(context.TheContext);
+        std::cerr<<"error: type '" << type.name << "' was not declared in this scope.\n";
+        exit(1);
+}
+
+Value *CodeGenContext::findValue(const NIdentifier &ident, const NIdentifier *parent)
+{
+    if (parent) {
+        Value *parentV = findValue(*parent, parent->parent);
+        Type *t = parentV->getType();
+        t = t->getPointerElementType();
+
+        t->dump();
+        if (t->isStructTy()) {
+            StructType *st = static_cast<StructType *>(t);
+            Struct &str = structs[st->getName()];
+
+            int id = -1;
+            for (int i = 0; i < str.fields.size(); ++i) {
+                if (str.fields[i] == ident.name) {
+                    id = i;
+                    break;
+                }
+            }
+            if (id == -1) {
+                std::cerr << "error: struct '" << st->getName().str() << "' has no member named '" << ident.name << "'.\n";
+                exit(1);
+            }
+
+            std::cout<<"fout id in struct "<<id<<"\n";
+
+            auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
+            auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, id, false));
+
+            return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
+        }
+    }
+
+    auto it = locals().find(ident.name);
+    if (it == locals().end()) {
+        std::cerr << "error: '" << ident.name << "' was not declared in this scope.\n";
+        exit(1);
+    }
+    return it->second;
 }
 
 /* -- Code Generation -- */
@@ -64,7 +105,7 @@ static Type *typeOf(const NIdentifier& type, CodeGenContext& context)
 Value* NInteger::codeGen(CodeGenContext& context)
 {
 	std::cout << "Creating integer: " << value << endl;
-	return ConstantInt::get(Type::getInt64Ty(context.TheContext), value, true);
+	return ConstantInt::get(Type::getInt32Ty(context.TheContext), value, true);
 }
 
 Value* NDouble::codeGen(CodeGenContext& context)
@@ -73,64 +114,11 @@ Value* NDouble::codeGen(CodeGenContext& context)
 	return ConstantFP::get(Type::getDoubleTy(context.TheContext), value);
 }
 
-Value *CodeGenContext::findValue(Value *parent, const std::string &name)
-{
-    return locals()[name];
-}
-
 Value* NIdentifier::codeGen(CodeGenContext& context)
 {
-    std::function<Value *(const NIdentifier *)> value = [&context, &value](const NIdentifier *ident) -> Value * {
 
-        std::cout<<"PPP "<<ident->name<<ident->parent<<"\n";
-        if (ident->parent) {
-            Value *parentV = value(ident->parent);
-//             auto *v = new LoadInst(parentV, "", false, context.currentBlock());
-            Type *t = parentV->getType();
-            t = t->getPointerElementType();
-
-            t->dump();
-            if (t->isStructTy()) {
-                StructType *st = static_cast<StructType *>(t);
-                Struct &str = context.structs[st->getName()];
-
-                            std::cout<<"    "<<st->getName().str()<<"\n";
-
-                int id = 0;
-                for (int i = 0; i < str.fields.size(); ++i) {
-                    if (str.fields[i] == ident->name) {
-                        id = i;
-                        break;
-                    }
-                }
-
-                std::cout<<"fout id in struct "<<id<<"\n";
-
-                auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
-                auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id, false));
-
-                return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "bla", context.currentBlock());
-//                  return parentV;
-            }
-        }
-        return context.locals()[ident->name];
-    };
-
-    Value *v = value(this);
-
-    if (parent) {
-//         return v;
-    }
-
-
-	std::cout << "Creating identifier reference: " << name << endl;
-	if (context.locals().find(name) == context.locals().end()) {
-		std::cerr << "undeclared variable " << name << endl;
-//                 exit(1);
-// 		return NULL;
-	}
-// 	return v;
-	return new LoadInst(v, "", false, context.currentBlock());
+//     std::cout << "Creating identifier reference: " << name << endl;
+    return new LoadInst(context.findValue(*this, parent), "", false, context.currentBlock()->block);
 }
 
 Value* NMethodCall::codeGen(CodeGenContext& context)
@@ -139,12 +127,39 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
 	if (function == NULL) {
 		std::cerr << "no such function " << id.name << endl;
 	}
+
 	std::vector<Value*> args;
-	ExpressionList::const_iterator it;
-	for (it = arguments.begin(); it != arguments.end(); it++) {
-		args.push_back((**it).codeGen(context));
+        args.resize(function->getArgumentList().size());
+
+        auto &funcList = function->getArgumentList();
+        auto findId = [&](const NIdentifier &id) -> int {
+            for (auto &&a: funcList) {
+                if (a.getName() == id.name) {
+                    return a.getArgNo();
+                }
+            }
+            return -1;
+        };
+
+	for (auto it = arguments.begin(); it != arguments.end(); it++) {
+            int index = findId((*it)->lhs);
+            if (index == -1) {
+                std::cerr << "Unexpected argument '" << (*it)->lhs.name << "' when calling function '" << id.name << "(";
+                for (auto i = funcList.begin(); i != funcList.end();) {
+                    auto &&a = *i;
+
+                    std::cerr << a.getName().str();
+                    if (++i != funcList.end()) {
+                        std::cerr << ", ";
+                    }
+                }
+                std::cerr << ")'.\n";
+                exit(1);
+            }
+
+            args[index] = (*it)->rhs.codeGen(context);
 	}
-	CallInst *call = CallInst::Create(function, makeArrayRef(args), "", context.currentBlock());
+	CallInst *call = CallInst::Create(function, makeArrayRef(args), "", context.currentBlock()->block);
 	std::cout << "Creating method call: " << id.name << endl;
 	return call;
 }
@@ -165,17 +180,14 @@ Value* NBinaryOperator::codeGen(CodeGenContext& context)
 	return NULL;
 math:
 	return BinaryOperator::Create(instr, lhs.codeGen(context), 
-		rhs.codeGen(context), "", context.currentBlock());
+		rhs.codeGen(context), "", context.currentBlock()->block);
 }
 
 Value* NAssignment::codeGen(CodeGenContext& context)
 {
-	std::cout << "Creating assignment for " << lhs.name << endl;
-	if (context.locals().find(lhs.name) == context.locals().end()) {
-		std::cerr << "undeclared variable " << lhs.name << endl;
-		return NULL;
-	}
-	return new StoreInst(rhs.codeGen(context), context.locals()[lhs.name], false, context.currentBlock());
+    auto parent = context.currentBlock()->currentId;
+//     std::cout << "Creating assignment for " << lhs.name << endl;
+    return new StoreInst(rhs.codeGen(context), context.findValue(lhs, parent), false, context.currentBlock()->block);
 }
 
 Value* NBlock::codeGen(CodeGenContext& context)
@@ -183,7 +195,7 @@ Value* NBlock::codeGen(CodeGenContext& context)
 	StatementList::const_iterator it;
 	Value *last = NULL;
 	for (it = statements.begin(); it != statements.end(); it++) {
-		std::cout << "Generating code for " << typeid(**it).name() << endl;
+		std::cout << "block: Generating code for " << typeid(**it).name() << endl;
 		last = (**it).codeGen(context);
 	}
 	std::cout << "Creating block" << endl;
@@ -206,14 +218,44 @@ Value* NReturnStatement::codeGen(CodeGenContext& context)
 
 Value* NVariableDeclaration::codeGen(CodeGenContext& context)
 {
-	std::cout << "Creating variable declaration " << type.name << " " << id.name << endl;
-	AllocaInst *alloc = new AllocaInst(typeOf(type, context), id.name.c_str(), context.currentBlock());
-	context.locals()[id.name] = alloc;
-	if (!expressions.empty()) {
-		NAssignment assn(id, *expressions.front());
-		assn.codeGen(context);
-	}
-	return alloc;
+    const int numExpressions = expressions.size();
+    std::cout << "Creating variable declaration " << id.name << endl;
+
+    Type *t = [&]() {
+        if (!type) {
+            if (numExpressions == 0) {
+                std::cerr << "error: missing type or initializer when declaring variable '" << id.name <<"'.\n";
+                exit(1);
+            }
+
+            auto value = expressions.front()->rhs.codeGen(context);
+            return value->getType();
+        }
+        return typeOf(*type, context);
+    }();
+
+    AllocaInst *alloc = new AllocaInst(t, id.name.c_str(), context.currentBlock()->block);
+    context.locals()[id.name] = alloc;
+
+    if (t->isStructTy()) {
+        Struct &str = context.structs[type->name];
+        if (numExpressions != str.fields.size()) {
+            std::cerr << "error: wrong number of initializers passed when declaring variable '" << id.name << "' of type '" << type->name << "'.\n";
+            exit(1);
+        }
+
+        context.currentBlock()->currentId = &id;
+        for (int i = 0; i < expressions.size(); ++i) {
+            expressions[i]->codeGen(context);
+        }
+        context.currentBlock()->currentId = nullptr;
+    } else if (numExpressions == 1) {
+        expressions.front()->codeGen(context);
+    } else if (numExpressions != 0) {
+        std::cerr << "error: wrong number of initializers passed when declaring variable '" << id.name << "' of type '" << type->name << "'.\n";
+        exit(1);
+    }
+    return alloc;
 }
 
 Value* NExternDeclaration::codeGen(CodeGenContext& context)
@@ -221,7 +263,7 @@ Value* NExternDeclaration::codeGen(CodeGenContext& context)
     vector<Type*> argTypes;
     VariableList::const_iterator it;
     for (it = arguments.begin(); it != arguments.end(); it++) {
-        argTypes.push_back(typeOf((**it).type, context));
+        argTypes.push_back(typeOf(*(**it).type, context));
     }
     FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
     Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.name.c_str(), context.module);
@@ -233,7 +275,7 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 	vector<Type*> argTypes;
 	VariableList::const_iterator it;
 	for (it = arguments.begin(); it != arguments.end(); it++) {
-		argTypes.push_back(typeOf((**it).type, context));
+		argTypes.push_back(typeOf(*(**it).type, context));
 	}
 	FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
 	Function *function = Function::Create(ftype, GlobalValue::InternalLinkage, id.name.c_str(), context.module);
@@ -245,10 +287,10 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
     Value* argumentValue;
 
 	for (it = arguments.begin(); it != arguments.end(); it++) {
-		(**it).codeGen(context);
-		
 		argumentValue = &*argsValues++;
 		argumentValue->setName((*it)->id.name.c_str());
+
+                (**it).codeGen(context);
 		StoreInst *inst = new StoreInst(argumentValue, context.locals()[(*it)->id.name], false, bblock);
 	}
 	
@@ -265,8 +307,8 @@ Value* NStructDeclaration::codeGen(CodeGenContext& context)
     std::cout << "Creating struct declaration " << " " << id.name << endl;
     vector<Type *> argTypes;
     for (auto it = elements.begin(); it != elements.end(); it++) {
-        argTypes.push_back(typeOf((**it).type, context));
-        std::cout<<"    with arg " << (*it)->type.name << " " <<(*it)->id.name<<"\n";
+        argTypes.push_back(typeOf(*(**it).type, context));
+        std::cout<<"    with arg " << (*it)->type->name << " " <<(*it)->id.name<<"\n";
     }
     StructType *type = StructType::create(context.TheContext, argTypes, id.name.c_str());
     Struct &str = context.structs[id.name];

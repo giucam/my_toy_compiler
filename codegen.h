@@ -21,12 +21,14 @@
 using namespace llvm;
 
 class NBlock;
+class NIdentifier;
 
 class CodeGenBlock {
 public:
     BasicBlock *block;
     Value *returnValue;
     std::map<std::string, Value*> locals;
+    NIdentifier *currentId;
 };
 
 struct Struct {
@@ -44,12 +46,12 @@ public:
     LLVMContext TheContext;
     CodeGenContext() { module = new Module("main", TheContext); }
 
-    Value *findValue(Value *parent, const std::string &name);
-    
+    Value *findValue(const NIdentifier &ident, const NIdentifier *parent);
+
     void generateCode(NBlock& root);
     GenericValue runCode();
     std::map<std::string, Value*>& locals() { return blocks.top()->locals; }
-    BasicBlock *currentBlock() { return blocks.top()->block; }
+    CodeGenBlock *currentBlock() { return blocks.top(); }
     void pushBlock(BasicBlock *block) { blocks.push(new CodeGenBlock()); blocks.top()->returnValue = NULL; blocks.top()->block = block; }
     void popBlock() { CodeGenBlock *top = blocks.top(); blocks.pop(); delete top; }
     void setCurrentReturnValue(Value *value) { blocks.top()->returnValue = value; }
