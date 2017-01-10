@@ -5,8 +5,17 @@
 #include "node.h"
 #include "codegen.h"
 #include "parser.hpp"
+#include "format.h"
 
 using namespace std;
+
+template<class... Args>
+static void error(Args &&... args)
+{
+    auto s = fmt::format(std::forward<Args>(args)...);
+    fmt::print(stderr, "\033[1;31merror:\033[1;37m {}.\033[0m\n", s);
+    exit(1);
+}
 
 /* Compile the AST into a module */
 void CodeGenContext::generateCode(NBlock& root)
@@ -56,7 +65,7 @@ static Type *typeOf(const NIdentifier& type, CodeGenContext& context)
 	if (type.name.compare("i32") == 0) {
 		return Type::getInt32Ty(context.TheContext);
 	}
-	else if (type.name.compare("double") == 0) {
+	else if (type.name.compare("f64") == 0) {
             return Type::getDoubleTy(context.TheContext);
         } else if (type.name.compare("void") == 0) {
             return Type::getVoidTy(context.TheContext);
@@ -172,14 +181,72 @@ Value* NIdentifier::codeGen(CodeGenContext& context)
     return new LoadInst(context.findValue(*this, parent), "", false, context.currentBlock()->block);
 }
 
+static std::string mangleFuncName(const std::string &name, const std::string &iface, const std::string &sig)
+{
+    return iface + "::" + name + sig;
+}
+
 Value* NMethodCall::codeGen(CodeGenContext& context)
 {
     std::cout << "Creating method call: " << id.name << endl;
 
+    struct Arg {
+        std::string name;
+        Value *value;
+    };
+    std::vector<Arg> values;
+
+    for (auto it = arguments.begin(); it != arguments.end(); it++) {
+        values.push_back({ (*it)->lhs.name, (*it)->rhs.codeGen(context) });
+    }
+
     Function *function = context.module->getFunction(id.name.c_str());
+
+    if (!function) {
+        auto it = context.ifacePrototypes.find(id.name);
+        if (it != context.ifacePrototypes.end()) {
+            auto proto = it->second;
+            auto iface = proto->iface;
+
+            std::cout<<"in iface "<<iface->name<<"\n";
+
+            std::vector<Type *> toMatch;
+            toMatch.resize(iface->parameters.size());
+
+            int i = 0;
+            for (auto &&v: values) {
+                auto t = v.value->getType();
+                auto par = proto->parameters[i];
+                std::cout<<"    ";v.value->getType()->dump(); std::cout<<" -> "<<par->name<<"\n";
+                for (int i = 0; i < iface->parameters.size(); ++i) {
+                    if (iface->parameters[i]->name == par->name) {
+                        toMatch[i] = t;
+                    }
+                }
+
+                ++i;
+            }
+
+            NImplDeclaration *implementation = nullptr;
+            for (auto &&impl: iface->implementations) {
+                if (impl->parameterTypes == toMatch) {
+                    implementation = impl;
+                    break;
+                }
+            }
+            if (!implementation) {
+                error("could not find suitable implementation for the '{}' interface, when calling '{}'", iface->name, id.name);
+            }
+
+            std::cout<<"found impl\n";
+
+            auto name = mangleFuncName(id.name, iface->name, implementation->id);
+            function = context.module->getFunction(name.c_str());
+        }
+    }
+
     if (function == NULL) {
-        std::cerr << "error: no such function '" << id.name << "'.\n";
-        exit(1);
+        error("no such function '{}'", id.name);
     }
 
     auto &&data = context.functions[function];
@@ -187,25 +254,25 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
     std::vector<Value*> args;
     args.resize(data.argumentNames.size());
 
-    auto findId = [&](const NIdentifier &id) -> int {
+    auto findId = [&](const std::string &name) -> int {
         int i = 0;
         for (auto &&a: data.argumentNames) {
-            if (a == id.name) {
+            if (a == name) {
                 return i;
             }
             ++i;
         }
-        if (function->isVarArg() && data.varargsName == id.name) {
+        if (function->isVarArg() && data.varargsName == name) {
             return -2;
         }
         return -1;
     };
 
     Value *varargs = nullptr;
-    for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        int index = findId((*it)->lhs);
+    for (auto &&v: values) {
+        int index = findId(v.name);
         if (index == -1) {
-            std::cerr << "Unexpected argument '" << (*it)->lhs.name << "' when calling function '" << id.name << "(";
+            std::cerr << "Unexpected argument '" << v.name << "' when calling function '" << id.name << "(";
             for (auto i = data.argumentNames.begin(); i != data.argumentNames.end();) {
                 auto &&a = *i;
 
@@ -217,11 +284,11 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
             std::cerr << ")'.\n";
             exit(1);
         } else if (index == -2) { //varargs
-            varargs = (*it)->rhs.codeGen(context);
+            varargs = v.value;
             continue;
         }
 
-        args[index] = (*it)->rhs.codeGen(context);
+        args[index] = v.value;
         args[index]->dump();
     }
 
@@ -242,7 +309,6 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
             auto val = GetElementPtrInst::CreateInBounds(varargs, {id1, id2}, "", context.currentBlock()->block);
             args.push_back(new LoadInst(val, "", false, context.currentBlock()->block));
         }
-
     }
 
     CallInst *call = CallInst::Create(function, makeArrayRef(args), "", context.currentBlock()->block);
@@ -256,8 +322,8 @@ Value* NBinaryOperator::codeGen(CodeGenContext& context)
 	switch (op) {
 		case TPLUS: 	instr = Instruction::Add; goto math;
 		case TMINUS: 	instr = Instruction::Sub; goto math;
-		case TMUL: 		instr = Instruction::Mul; goto math;
-		case TDIV: 		instr = Instruction::SDiv; goto math;
+                case TMUL: 	instr = Instruction::Mul; goto math;
+		case TDIV: 	instr = Instruction::SDiv; goto math;
 				
 		/* TODO comparison */
 	}
@@ -380,6 +446,11 @@ Value* NExternDeclaration::codeGen(CodeGenContext& context)
 
 Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 {
+    if (context.module->getFunction(id.name.c_str())) {
+        std::cerr << "error: function '" << id.name.c_str() << "' is already declared.\n";
+        exit(1);
+    }
+
 	vector<Type*> argTypes;
 	for (auto it = arguments.begin(); it != arguments.end(); it++) {
 		argTypes.push_back(typeOf(*(**it).type, context));
@@ -464,4 +535,70 @@ Value *NTuple::codeGen(CodeGenContext& context)
 
 //     return new LoadInst(alloc, "", false, context.currentBlock()->block);
     return alloc;
+}
+
+Value *NIfaceDeclaration::codeGen(CodeGenContext &context)
+{
+    context.interfaces[name] = this;
+    if (prototypes.size() == 0) {
+        error("cannot create an empty interface");
+    }
+    for (auto &&p: prototypes) {
+        p->iface = this;
+        context.ifacePrototypes[p->name] = p;
+    }
+
+    return 0;
+}
+
+Value *NImplDeclaration::codeGen(CodeGenContext &context)
+{
+    auto it = context.interfaces.find(name);
+    if (it == context.interfaces.end()) {
+        error("trying to implement unknown interface '{}'", name);
+    }
+
+    NIfaceDeclaration *iface = it->second;
+
+    for (auto &&p: iface->prototypes) {
+        bool hasProto = false;
+        for (auto &&f: functions) {
+            if (f->id.name == p->name) {
+                hasProto = true;
+                break;
+            }
+        }
+        if (!hasProto) {
+            error("missing implementation in interface '{}' for function '{}'", name, p->name);
+        }
+    }
+    for (auto &&f: functions) {
+        bool hasProto = false;
+        for (auto &&p: iface->prototypes) {
+            if (f->id.name == p->name) {
+                hasProto = true;
+                break;
+            }
+        }
+        if (!hasProto) {
+            error("unrelated function '{}' in implementation of interface '{}'", f->id.name, name);
+        }
+    }
+
+    iface->implementations.push_back(this);
+
+    raw_string_ostream stream(id);
+    for (auto &&par: parameters) {
+        auto t = typeOf(par->name, context);
+        t->print(stream);
+        parameterTypes.push_back(t);
+    }
+    stream.flush();
+
+    for (auto &&func: functions) {
+        func->id.name = mangleFuncName(func->id.name, iface->name, id);
+        func->codeGen(context);
+    }
+
+    return 0;
 }

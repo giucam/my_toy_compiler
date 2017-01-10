@@ -22,6 +22,8 @@ using namespace llvm;
 
 class NBlock;
 class NIdentifier;
+class NIfaceDeclaration;
+class NIfacePrototype;
 
 class CodeGenBlock {
 public:
@@ -54,6 +56,10 @@ public:
     std::unordered_map<Type *, Struct *> structsByType;
     std::unordered_map<Type *, Tuple> tuples;
     std::unordered_map<Function *, FunctionData> functions;
+
+    std::unordered_map<std::string, NIfacePrototype *> ifacePrototypes;
+    std::unordered_map<std::string, NIfaceDeclaration *> interfaces;
+
     Module *module;
     LLVMContext TheContext;
     CodeGenContext() { module = new Module("main", TheContext); }

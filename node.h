@@ -7,11 +7,18 @@ class NStatement;
 class NExpression;
 class NVariableDeclaration;
 class NAssignment;
+class NIfaceParameter;
+class NIfacePrototype;
+class NFunctionDeclaration;
+class NImplDeclaration;
 
 typedef std::vector<NStatement*> StatementList;
 typedef std::vector<NExpression*> ExpressionList;
 typedef std::vector<NVariableDeclaration*> VariableList;
 typedef std::vector<NAssignment *> AssignmentList;
+typedef std::vector<NIfaceParameter *> NIfaceParameterList;
+typedef std::vector<NIfacePrototype *> NIfacePrototypeList;
+typedef std::vector<NFunctionDeclaration *> FuncDeclarationList;
 
 class Node {
 public:
@@ -150,10 +157,10 @@ public:
 class NFunctionDeclaration : public NStatement {
 public:
 	const NIdentifier& type;
-	const NIdentifier& id;
+	NIdentifier& id;
 	VariableList arguments;
 	NBlock& block;
-	NFunctionDeclaration(const NIdentifier& type, const NIdentifier& id, 
+	NFunctionDeclaration(const NIdentifier& type, NIdentifier& id,
 			const VariableList& arguments, NBlock& block) :
 		type(type), id(id), arguments(arguments), block(block) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
@@ -176,4 +183,48 @@ public:
     llvm::Value *codeGen(CodeGenContext& context) override;
 
     std::vector<NExpression *> expressions;
+};
+
+class NIfaceDeclaration: public NStatement {
+public:
+    NIfaceDeclaration(const std::string &name, NIfaceParameterList *par, NIfacePrototypeList *pro) : name(name) { std::swap(parameters, *par); std::swap(prototypes, *pro); }
+    llvm::Value *codeGen(CodeGenContext& context) override;
+
+    std::string name;
+    NIfaceParameterList parameters;
+    NIfacePrototypeList prototypes;
+    std::vector<NImplDeclaration *> implementations;
+};
+
+class NIfaceParameter : public Node {
+public:
+    NIfaceParameter(const std::string &name) : name(name) {}
+
+//     llvm::Value *codeGen(CodeGenContext& context) override;
+
+    std::string name;
+};
+
+class NIfacePrototype : public NStatement {
+public:
+    NIfacePrototype(const std::string &name, NIfaceParameterList *par) : name(name) { std::swap(parameters, *par); }
+//     llvm::Value *codeGen(CodeGenContext& context) override;
+
+    std::string name;
+    NIfaceParameterList parameters;
+    NIfaceDeclaration *iface;
+};
+
+class NImplDeclaration : public NStatement
+{
+public:
+    NImplDeclaration(const std::string &name, NIfaceParameterList *par, FuncDeclarationList *funcs) : name(name) { std::swap(parameters, *par); std::swap(functions, *funcs); }
+
+    llvm::Value *codeGen(CodeGenContext& context) override;
+
+    std::string name;
+    std::string id;
+    NIfaceParameterList parameters;
+    FuncDeclarationList functions;
+    std::vector<llvm::Type *> parameterTypes;
 };

@@ -1,31 +1,81 @@
 extern puts(val: string): i32
 extern printf(format: string, args: ...): i32
 
-
-func do_math(a: i32, b: i32): i32 {
-    let x: i32 = a * 5 + b;
-    return x + 3;
+iface math(A, B) {
+    func do_math(A, B);
 }
+
+impl math(i32, i32) {
+    func do_math(a: i32, b: i32): i32 {
+        let x: i32 = a * 5 + b;
+        return x + 3;
+    }
+}
+
+impl math(f64, f64) {
+    func do_math(a: f64, b: f64): f64 {
+//         let x: f64 = a * 5 + b;
+//         return x + 3;
+        return a;
+    }
+}
+
+iface printable(A) {
+    func print(A);
+}
+
+impl printable(i32) {
+    func print(value: i32): void {
+        printf(format = "%d",  args = [ value ]);
+    }
+}
+
+impl printable(f64) {
+    func print(value: f64): void {
+        printf(format = "%f",  args = [ value ]);
+    }
+}
+
+
+// func do_math(a: i32, b: i32): i32 {
+//     let x: i32 = a * 5 + b;
+//     return x + 3;
+// }
+// func do_math(a: f64, b: f64): f64 {
+//     return a;
+// }
+
+struct S1 {
+    f: i32;
+}
+
 struct foo {
     ddd: i32;
     pupu: i32;
+    s1: S1;
 }
 
 func main(): i32 {
     let gg = 6;
-    let bla: foo = { ddd = 3, pupu = gg };
+    let sss: S1 = { f = gg };
+    let bla: foo = { ddd = 3, pupu = gg, s1 = sss };
 
-    let tuple = [ 3, "rew" ];
+    let tuple = [ 3, "rew", [ "tre" ] ];
 
-    let m = do_math(a = bla.ddd, b = bla.pupu);
+    let m = do_math(a = bla.ddd, b = bla.s1.f);
+
+    let fm = do_math(a = 3.4, b = 1.2);
 //let m = do_math(a = 4, b = 5)
     //echo(toPrint = m)
     //printi(val=3)
 
-    let s = "printf 1: '%s' 2: '%d' 3: '%d'\n";
+    let s = "printf 1: '%s' 2: '%f' 3: '%d'\n";
 
-    printf(format = s, args = [ "blab", m, 56 * tuple.0 ]);
-    puts(val = tuple.1);
+    printf(format = s, args = [ "blab", fm, 56 * tuple.0 ]);
+    puts(val = tuple.2.0);
+
+    print(value = 3.3);
+
     return 0;
 }
 
