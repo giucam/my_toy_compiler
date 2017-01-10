@@ -4,7 +4,6 @@ OBJS = parser.o  \
        codegen.o \
        main.o    \
        tokens.o  \
-       corefn.o  \
 	   native.o  \
 
 LLVMCONFIG = llvm-config
@@ -31,4 +30,4 @@ parser: $(OBJS)
 	g++ -o $@ $(OBJS) $(LIBS) $(LDFLAGS)
 
 test: parser example.txt
-	cat example.txt | ./parser
+	cat example.txt | ./parser && clang out.ll && ./a.out

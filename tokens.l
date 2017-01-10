@@ -19,6 +19,7 @@
 ";"                         return TOKEN(TSEMICOLON);
 "struct"                    return TOKEN(TSTRUCT);
 "func"                      return TOKEN(TFUNC);
+\".*\"                        yylval.string = new std::string(yyleng > 0 ? yytext + 1 : yytext, yyleng > 2 ? yyleng - 2 : 0); return TSTRING;
 [a-zA-Z_][a-zA-Z0-9_]*  SAVE_TOKEN; return TIDENTIFIER;
 [0-9]+\.[0-9]* 			    SAVE_TOKEN; return TDOUBLE;
 [0-9]+					        SAVE_TOKEN; return TINTEGER;

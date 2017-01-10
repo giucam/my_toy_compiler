@@ -39,6 +39,14 @@ public:
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
+class NString : public NExpression {
+public:
+    std::string value;
+    NString(std::string *val) : value(*val) {}
+
+    virtual llvm::Value* codeGen(CodeGenContext& context) override;
+};
+
 class NIdentifier : public NExpression {
 public:
         const NIdentifier *parent;
@@ -72,9 +80,12 @@ class NAssignment : public NExpression {
 public:
 	const NIdentifier& lhs;
 	NExpression& rhs;
+        llvm::Value *rhsValue;
 	NAssignment(const NIdentifier& lhs, NExpression& rhs) :
-		lhs(lhs), rhs(rhs) { }
+		lhs(lhs), rhs(rhs), rhsValue(nullptr) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
+
+        llvm::Value *genRhs(CodeGenContext &context);
 };
 
 class NBlock : public NExpression {

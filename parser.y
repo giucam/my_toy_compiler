@@ -27,7 +27,7 @@
    match our tokens.l lex file. We also define the node type
    they represent.
  */
-%token <string> TIDENTIFIER TINTEGER TDOUBLE
+%token <string> TIDENTIFIER TINTEGER TDOUBLE TSTRING
 %token <token> TCEQ TCNE TCLT TCLE TCGT TCGE TEQUAL
 %token <token> TLPAREN TRPAREN TLBRACE TRBRACE TCOMMA TDOT
 %token <token> TPLUS TMINUS TMUL TDIV
@@ -40,7 +40,7 @@
    calling an (NIdentifier*). It makes the compiler happy.
  */
 %type <ident> ident
-%type <expr> numeric expr
+%type <expr> numeric expr string
 %type <varvec> func_decl_args struct_decl_args
 %type <argvec> call_args
 %type <block> program stmts block
@@ -78,8 +78,8 @@ var_decl : TLET ident TCOLON ident { $$ = new NVariableDeclaration($4, *$2); }
          | TLET ident TEQUAL expr { $$ = new NVariableDeclaration(*$2, new NAssignment(*$2, *$4)); }
          ;
 
-extern_decl : TEXTERN ident ident TLPAREN func_decl_args TRPAREN
-                { $$ = new NExternDeclaration(*$2, *$3, *$5); delete $5; }
+extern_decl : TEXTERN ident TLPAREN func_decl_args TRPAREN TCOLON ident
+                { $$ = new NExternDeclaration(*$7, *$2, *$4); delete $4; }
             ;
 
 func_decl : TFUNC ident TLPAREN func_decl_args TRPAREN TCOLON ident block
@@ -107,9 +107,12 @@ numeric : TINTEGER { $$ = new NInteger(atol($1->c_str())); delete $1; }
 		| TDOUBLE { $$ = new NDouble(atof($1->c_str())); delete $1; }
 		;
 
+string : TSTRING { $$ = new NString($1); };
+
 expr : ident TLPAREN call_args TRPAREN { $$ = new NMethodCall(*$1, *$3); delete $3; }
      | ident { $<ident>$ = $1; }
      | numeric
+     | string
      | expr TMUL expr { $$ = new NBinaryOperator(*$1, $2, *$3); }
      | expr TDIV expr { $$ = new NBinaryOperator(*$1, $2, *$3); }
      | expr TPLUS expr { $$ = new NBinaryOperator(*$1, $2, *$3); }

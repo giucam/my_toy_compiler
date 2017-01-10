@@ -1,3 +1,7 @@
+#include <fstream>
+
+#include "llvm/Support/raw_os_ostream.h"
+
 #include "node.h"
 #include "codegen.h"
 #include "parser.hpp"
@@ -12,14 +16,15 @@ void CodeGenContext::generateCode(NBlock& root)
 	/* Create the top level interpreter function to call as entry */
 	vector<Type*> argTypes;
 	FunctionType *ftype = FunctionType::get(Type::getVoidTy(TheContext), makeArrayRef(argTypes), false);
-	mainFunction = Function::Create(ftype, GlobalValue::InternalLinkage, "main", module);
-	BasicBlock *bblock = BasicBlock::Create(TheContext, "entry", mainFunction, 0);
+	BasicBlock *bblock = BasicBlock::Create(TheContext, "entry", 0, 0);
 	
 	/* Push a new variable/block context */
 	pushBlock(bblock);
 	root.codeGen(*this); /* emit bytecode for the toplevel block */
 	ReturnInst::Create(TheContext, bblock);
 	popBlock();
+
+        mainFunction = module->getFunction("main");
 	
 	/* Print the bytecode in a human-readable format 
 	   to see if our program compiled properly
@@ -29,6 +34,10 @@ void CodeGenContext::generateCode(NBlock& root)
         AnalysisManager<Module>* am = new AnalysisManager<Module>;
 	pm.addPass(PrintModulePass(outs()));
 	pm.run(*module, *am);
+
+        std::ofstream StdOutputFile("out.ll");
+        raw_os_ostream OutputFile(StdOutputFile);
+        module->print(OutputFile, nullptr);
 }
 
 /* Executes the AST by running the main function */
@@ -52,6 +61,8 @@ static Type *typeOf(const NIdentifier& type, CodeGenContext& context)
             return Type::getDoubleTy(context.TheContext);
         } else if (type.name.compare("void") == 0) {
             return Type::getVoidTy(context.TheContext);
+        } else if (type.name.compare("string") == 0) {
+            return Type::getInt8PtrTy(context.TheContext);
         } else if (context.structs.find(type.name) != context.structs.end()) {
             return context.structs[type.name].type;
         }
@@ -114,10 +125,20 @@ Value* NDouble::codeGen(CodeGenContext& context)
 	return ConstantFP::get(Type::getDoubleTy(context.TheContext), value);
 }
 
+Value* NString::codeGen(CodeGenContext& context)
+{
+    std::cout << "Creating string: " << value << endl;
+    auto constant = ConstantDataArray::getString(context.TheContext, value);
+    auto var = new GlobalVariable(*context.module, ArrayType::get(Type::getInt8Ty(context.TheContext), value.length() + 1), true, llvm::GlobalValue::PrivateLinkage, constant, ".str");
+
+    auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
+    auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
+
+    return GetElementPtrInst::CreateInBounds(var, {id1, id2}, "", context.currentBlock()->block);
+}
+
 Value* NIdentifier::codeGen(CodeGenContext& context)
 {
-
-//     std::cout << "Creating identifier reference: " << name << endl;
     return new LoadInst(context.findValue(*this, parent), "", false, context.currentBlock()->block);
 }
 
@@ -185,9 +206,17 @@ math:
 
 Value* NAssignment::codeGen(CodeGenContext& context)
 {
+    std::cout << "Creating assignment for " << lhs.name << endl;
     auto parent = context.currentBlock()->currentId;
-//     std::cout << "Creating assignment for " << lhs.name << endl;
-    return new StoreInst(rhs.codeGen(context), context.findValue(lhs, parent), false, context.currentBlock()->block);
+    return new StoreInst(genRhs(context), context.findValue(lhs, parent), false, context.currentBlock()->block);
+}
+
+Value *NAssignment::genRhs(CodeGenContext &context)
+{
+    if (!rhsValue) {
+        rhsValue = rhs.codeGen(context);
+    }
+    return rhsValue;
 }
 
 Value* NBlock::codeGen(CodeGenContext& context)
@@ -228,7 +257,7 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
                 exit(1);
             }
 
-            auto value = expressions.front()->rhs.codeGen(context);
+            auto value = expressions.front()->genRhs(context);
             return value->getType();
         }
         return typeOf(*type, context);
@@ -267,6 +296,14 @@ Value* NExternDeclaration::codeGen(CodeGenContext& context)
     }
     FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
     Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.name.c_str(), context.module);
+
+    Value *argumentValue;
+    Function::arg_iterator argsValues = function->arg_begin();
+    for (auto it = arguments.begin(); it != arguments.end(); it++) {
+        argumentValue = &*argsValues++;
+        argumentValue->setName((*it)->id.name.c_str());
+    }
+
     return function;
 }
 
@@ -278,7 +315,7 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 		argTypes.push_back(typeOf(*(**it).type, context));
 	}
 	FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
-	Function *function = Function::Create(ftype, GlobalValue::InternalLinkage, id.name.c_str(), context.module);
+	Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.name.c_str(), context.module);
 	BasicBlock *bblock = BasicBlock::Create(context.TheContext, "entry", function, 0);
 
 	context.pushBlock(bblock);

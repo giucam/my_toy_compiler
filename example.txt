@@ -1,4 +1,5 @@
-extern void printi(val: i32)
+extern puts(val: string): i32
+extern printf(format: string, n: i32): i32
 
 
 func do_math(a: i32, b: i32): i32 {
@@ -10,14 +11,24 @@ struct foo {
     pupu: i32;
 }
 
-let gg = 6
-let bla: foo = { ddd = 3, pupu = gg }
+func main(): i32 {
+    let gg = 6
+    let bla: foo = { ddd = 3, pupu = gg }
 
 //bla.pupu=7
 
-let m = do_math(a = bla.ddd, b = bla.pupu)
+    let m = do_math(a = bla.ddd, b = bla.pupu)
 //let m = do_math(a = 4, b = 5)
-echo(toPrint = m)
+    //echo(toPrint = m)
+    //printi(val=3)
+
+    let s = "jjjjj %d\n"
+
+    printf(format = s, n = m)
+    return 0
+}
+
+
 
 //echo(do_math(bla.ddd, bla.pupu))
 //echo(do_math(12))
