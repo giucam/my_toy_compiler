@@ -127,7 +127,18 @@ Value* NDouble::codeGen(CodeGenContext& context)
 
 Value* NString::codeGen(CodeGenContext& context)
 {
-    std::cout << "Creating string: " << value << endl;
+    std::cout << "Creating string: \"" << value << "\", (";
+    for (auto it = value.begin(); it != value.end();) {
+        char c = *it;
+        if (c == '\n') std::cout << "\\n";
+        else std::cout << c;
+        if (++it != value.end()) {
+            std::cout << ", ";
+        } else {
+            break;
+        }
+    }
+    std::cout << ")\n";
     auto constant = ConstantDataArray::getString(context.TheContext, value);
     auto var = new GlobalVariable(*context.module, ArrayType::get(Type::getInt8Ty(context.TheContext), value.length() + 1), true, llvm::GlobalValue::PrivateLinkage, constant, ".str");
 

@@ -22,7 +22,7 @@ func main(): i32 {
     //echo(toPrint = m)
     //printi(val=3)
 
-    let s = "jjjjj %d\n"
+    let s = "jjjjj 45 \t %d\n"
 
     printf(format = s, n = m)
     return 0
