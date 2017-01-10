@@ -15,6 +15,7 @@
 	NExpression *expr;
 	NStatement *stmt;
 	NIdentifier *ident;
+	NTuple *tuple;
 	NVariableDeclaration *var_decl;
 	std::vector<NVariableDeclaration*> *varvec;
 	std::vector<NExpression*> *exprvec;
@@ -29,7 +30,7 @@
  */
 %token <string> TIDENTIFIER TINTEGER TDOUBLE TSTRING
 %token <token> TCEQ TCNE TCLT TCLE TCGT TCGE TEQUAL
-%token <token> TLPAREN TRPAREN TLBRACE TRBRACE TCOMMA TDOT
+%token <token> TLPAREN TRPAREN TLBRACE TRBRACE TCOMMA TDOT TELLIPSIS TLBRACKET TRBRACKET
 %token <token> TPLUS TMINUS TMUL TDIV
 %token <token> TRETURN TEXTERN TLET TCOLON TSEMICOLON
 %token <token> TSTRUCT TFUNC
@@ -40,7 +41,7 @@
    calling an (NIdentifier*). It makes the compiler happy.
  */
 %type <ident> ident
-%type <expr> numeric expr string
+%type <expr> numeric expr string tuple
 %type <varvec> func_decl_args struct_decl_args
 %type <argvec> call_args
 %type <block> program stmts block
@@ -62,10 +63,10 @@ stmts : stmt { $$ = new NBlock(); $$->statements.push_back($<stmt>1); }
 	  | stmts stmt { $1->statements.push_back($<stmt>2); }
 	  ;
 
-stmt : var_decl | func_decl | extern_decl | struct_decl
-     | ident TEQUAL expr { $$ = new NExpressionStatement(*(new NAssignment(*$<ident>1, *$3))); }
-	 | expr { $$ = new NExpressionStatement(*$1); }
-	 | TRETURN expr { $$ = new NReturnStatement(*$2); }
+stmt : var_decl TSEMICOLON | func_decl | extern_decl | struct_decl
+     | ident TEQUAL expr TSEMICOLON { $$ = new NExpressionStatement(*(new NAssignment(*$<ident>1, *$3))); }
+     | expr TSEMICOLON { $$ = new NExpressionStatement(*$1); }
+     | TRETURN expr TSEMICOLON { $$ = new NReturnStatement(*$2); }
      ;
 
 block : TLBRACE stmts TRBRACE { $$ = $2; }
@@ -78,8 +79,8 @@ var_decl : TLET ident TCOLON ident { $$ = new NVariableDeclaration($4, *$2); }
          | TLET ident TEQUAL expr { $$ = new NVariableDeclaration(*$2, new NAssignment(*$2, *$4)); }
          ;
 
-extern_decl : TEXTERN ident TLPAREN func_decl_args TRPAREN TCOLON ident
-                { $$ = new NExternDeclaration(*$7, *$2, *$4); delete $4; }
+extern_decl : TEXTERN ident TLPAREN func_decl_args TRPAREN TCOLON ident { $$ = new NExternDeclaration(*$7, *$2, *$4, false); delete $4; }
+/*             | TEXTERN ident TLPAREN func_decl_args TCOMMA TELLIPSIS TRPAREN TCOLON ident { $$ = new NExternDeclaration(*$9, *$2, *$4, true); delete $4; } */
             ;
 
 func_decl : TFUNC ident TLPAREN func_decl_args TRPAREN TCOLON ident block
@@ -101,6 +102,7 @@ struct_decl_args : /*blank*/ { $$ = new VariableList(); }
 
 ident : TIDENTIFIER { $$ = new NIdentifier(*$1); delete $1; }
       | ident TDOT TIDENTIFIER { $$ = new NIdentifier($<ident>1, *$3); delete $3; }
+      | ident TDOT TINTEGER { $$ = new NIdentifier($<ident>1, std::stoi(*$3)); delete $3; }
       ;
 
 numeric : TINTEGER { $$ = new NInteger(atol($1->c_str())); delete $1; }
@@ -109,10 +111,16 @@ numeric : TINTEGER { $$ = new NInteger(atol($1->c_str())); delete $1; }
 
 string : TSTRING { $$ = new NString($1); };
 
+tuple: TLBRACKET { $$ = new NTuple(); }
+     | tuple expr TCOMMA { static_cast<NTuple *>($$)->add($2); }
+     | tuple expr TRBRACKET { static_cast<NTuple *>($$)->add($2); }
+     ;
+
 expr : ident TLPAREN call_args TRPAREN { $$ = new NMethodCall(*$1, *$3); delete $3; }
      | ident { $<ident>$ = $1; }
      | numeric
      | string
+     | tuple
      | expr TMUL expr { $$ = new NBinaryOperator(*$1, $2, *$3); }
      | expr TDIV expr { $$ = new NBinaryOperator(*$1, $2, *$3); }
      | expr TPLUS expr { $$ = new NBinaryOperator(*$1, $2, *$3); }

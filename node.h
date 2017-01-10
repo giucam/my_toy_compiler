@@ -50,9 +50,18 @@ public:
 class NIdentifier : public NExpression {
 public:
         const NIdentifier *parent;
-	std::string name;
-	NIdentifier(const std::string& name) : parent(nullptr), name(name) { }
-	NIdentifier(const NIdentifier *p, const std::string &name) : parent(p), name(name) {}
+        union {
+            std::string name;
+            int index;
+        };
+        enum {
+            Name,
+            Index
+        } type;
+	NIdentifier(const std::string& name) : parent(nullptr), name(name), type(Name) { }
+	NIdentifier(const NIdentifier *p, const std::string &name) : parent(p), name(name), type(Name) {}
+	NIdentifier(const NIdentifier *p, int index) : parent(p), index(index), type(Index) {}
+	~NIdentifier() {}
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
@@ -131,9 +140,10 @@ public:
     const NIdentifier& type;
     const NIdentifier& id;
     VariableList arguments;
+    bool varargs;
     NExternDeclaration(const NIdentifier& type, const NIdentifier& id,
-            const VariableList& arguments) :
-        type(type), id(id), arguments(arguments) {}
+            const VariableList& arguments, bool varargs) :
+        type(type), id(id), arguments(arguments), varargs(varargs) {}
     virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
@@ -156,4 +166,14 @@ public:
     NStructDeclaration(const NIdentifier &id, const VariableList &elements) : id(id), elements(elements) {}
 
     llvm::Value* codeGen(CodeGenContext& context) override;
+};
+
+class NTuple : public NExpression {
+public:
+    NTuple() {}
+    void add(NExpression *expr) { expressions.push_back(expr); }
+
+    llvm::Value *codeGen(CodeGenContext& context) override;
+
+    std::vector<NExpression *> expressions;
 };

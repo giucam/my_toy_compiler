@@ -15,7 +15,6 @@ void CodeGenContext::generateCode(NBlock& root)
 	
 	/* Create the top level interpreter function to call as entry */
 	vector<Type*> argTypes;
-	FunctionType *ftype = FunctionType::get(Type::getVoidTy(TheContext), makeArrayRef(argTypes), false);
 	BasicBlock *bblock = BasicBlock::Create(TheContext, "entry", 0, 0);
 	
 	/* Push a new variable/block context */
@@ -75,10 +74,15 @@ Value *CodeGenContext::findValue(const NIdentifier &ident, const NIdentifier *pa
     if (parent) {
         Value *parentV = findValue(*parent, parent->parent);
         Type *t = parentV->getType();
+
         t = t->getPointerElementType();
+        if (t->isPointerTy()) {
+            parentV = new LoadInst(parentV, "", false, currentBlock()->block);
+            t = parentV->getType()->getPointerElementType();
+        }
 
         t->dump();
-        if (t->isStructTy()) {
+        if (structsByType.find(t) != structsByType.end()) {
             StructType *st = static_cast<StructType *>(t);
             Struct &str = structs[st->getName()];
 
@@ -98,6 +102,21 @@ Value *CodeGenContext::findValue(const NIdentifier &ident, const NIdentifier *pa
 
             auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
             auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, id, false));
+
+            return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
+        } else if (tuples.find(t) != tuples.end()) {
+            if (ident.type != NIdentifier::Index) {
+                std::cerr << "error: tuple elements can only be accessed by index.\n";
+                exit(1);
+            }
+            StructType *st = static_cast<StructType *>(t);
+            if (ident.index < 0 || ident.index > st->elements().size()) {
+                std::cerr << "error: invalid index '" << ident.index << "' when accessing tuple element.\n";
+                exit(1);
+            }
+            std::cout<<"index "<<ident.index<<"\n";
+            auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
+            auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, ident.index, false));
 
             return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
         }
@@ -155,45 +174,79 @@ Value* NIdentifier::codeGen(CodeGenContext& context)
 
 Value* NMethodCall::codeGen(CodeGenContext& context)
 {
-	Function *function = context.module->getFunction(id.name.c_str());
-	if (function == NULL) {
-		std::cerr << "no such function " << id.name << endl;
-	}
+    std::cout << "Creating method call: " << id.name << endl;
 
-	std::vector<Value*> args;
-        args.resize(function->getArgumentList().size());
+    Function *function = context.module->getFunction(id.name.c_str());
+    if (function == NULL) {
+        std::cerr << "error: no such function '" << id.name << "'.\n";
+        exit(1);
+    }
 
-        auto &funcList = function->getArgumentList();
-        auto findId = [&](const NIdentifier &id) -> int {
-            for (auto &&a: funcList) {
-                if (a.getName() == id.name) {
-                    return a.getArgNo();
+    auto &&data = context.functions[function];
+
+    std::vector<Value*> args;
+    args.resize(data.argumentNames.size());
+
+    auto findId = [&](const NIdentifier &id) -> int {
+        int i = 0;
+        for (auto &&a: data.argumentNames) {
+            if (a == id.name) {
+                return i;
+            }
+            ++i;
+        }
+        if (function->isVarArg() && data.varargsName == id.name) {
+            return -2;
+        }
+        return -1;
+    };
+
+    Value *varargs = nullptr;
+    for (auto it = arguments.begin(); it != arguments.end(); it++) {
+        int index = findId((*it)->lhs);
+        if (index == -1) {
+            std::cerr << "Unexpected argument '" << (*it)->lhs.name << "' when calling function '" << id.name << "(";
+            for (auto i = data.argumentNames.begin(); i != data.argumentNames.end();) {
+                auto &&a = *i;
+
+                std::cerr << a;
+                if (++i != data.argumentNames.end()) {
+                    std::cerr << ", ";
                 }
             }
-            return -1;
-        };
+            std::cerr << ")'.\n";
+            exit(1);
+        } else if (index == -2) { //varargs
+            varargs = (*it)->rhs.codeGen(context);
+            continue;
+        }
 
-	for (auto it = arguments.begin(); it != arguments.end(); it++) {
-            int index = findId((*it)->lhs);
-            if (index == -1) {
-                std::cerr << "Unexpected argument '" << (*it)->lhs.name << "' when calling function '" << id.name << "(";
-                for (auto i = funcList.begin(); i != funcList.end();) {
-                    auto &&a = *i;
+        args[index] = (*it)->rhs.codeGen(context);
+        args[index]->dump();
+    }
 
-                    std::cerr << a.getName().str();
-                    if (++i != funcList.end()) {
-                        std::cerr << ", ";
-                    }
-                }
-                std::cerr << ")'.\n";
-                exit(1);
-            }
+    if (varargs) {
+        auto *t = varargs->getType();
+        t = t->getPointerElementType();
+        if (context.tuples.find(t) == context.tuples.end()) {
+            std::cerr << "error: expected a tuple as the varargs argument.\n";
+            exit(1);
+        }
+        auto *st = static_cast<StructType *>(t);
 
-            args[index] = (*it)->rhs.codeGen(context);
-	}
-	CallInst *call = CallInst::Create(function, makeArrayRef(args), "", context.currentBlock()->block);
-	std::cout << "Creating method call: " << id.name << endl;
-	return call;
+        int id = 0;
+        for (auto &&el: st->elements()) {
+            auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
+            auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id++, false));
+
+            auto val = GetElementPtrInst::CreateInBounds(varargs, {id1, id2}, "", context.currentBlock()->block);
+            args.push_back(new LoadInst(val, "", false, context.currentBlock()->block));
+        }
+
+    }
+
+    CallInst *call = CallInst::Create(function, makeArrayRef(args), "", context.currentBlock()->block);
+    return call;
 }
 
 Value* NBinaryOperator::codeGen(CodeGenContext& context)
@@ -277,7 +330,7 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
     AllocaInst *alloc = new AllocaInst(t, id.name.c_str(), context.currentBlock()->block);
     context.locals()[id.name] = alloc;
 
-    if (t->isStructTy()) {
+    if (t->isStructTy() && context.structsByType.find(t) != context.structsByType.end()) {
         Struct &str = context.structs[type->name];
         if (numExpressions != str.fields.size()) {
             std::cerr << "error: wrong number of initializers passed when declaring variable '" << id.name << "' of type '" << type->name << "'.\n";
@@ -301,18 +354,25 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
 Value* NExternDeclaration::codeGen(CodeGenContext& context)
 {
     vector<Type*> argTypes;
-    VariableList::const_iterator it;
-    for (it = arguments.begin(); it != arguments.end(); it++) {
+    bool varargs = false;
+    for (auto it = arguments.begin(); it != arguments.end(); it++) {
+        if ((**it).type->name == "...") {
+            varargs = true;
+            continue;
+        }
         argTypes.push_back(typeOf(*(**it).type, context));
     }
-    FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
+    FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), varargs);
     Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.name.c_str(), context.module);
 
-    Value *argumentValue;
-    Function::arg_iterator argsValues = function->arg_begin();
+    auto &data = context.functions[function];
     for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        argumentValue = &*argsValues++;
-        argumentValue->setName((*it)->id.name.c_str());
+        auto &&name = (*it)->id.name;
+        if ((**it).type->name == "...") {
+            data.varargsName = name;
+            continue;
+        }
+        data.argumentNames.push_back(name);
     }
 
     return function;
@@ -321,8 +381,7 @@ Value* NExternDeclaration::codeGen(CodeGenContext& context)
 Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 {
 	vector<Type*> argTypes;
-	VariableList::const_iterator it;
-	for (it = arguments.begin(); it != arguments.end(); it++) {
+	for (auto it = arguments.begin(); it != arguments.end(); it++) {
 		argTypes.push_back(typeOf(*(**it).type, context));
 	}
 	FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
@@ -334,13 +393,19 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 	Function::arg_iterator argsValues = function->arg_begin();
     Value* argumentValue;
 
-	for (it = arguments.begin(); it != arguments.end(); it++) {
+	for (auto it = arguments.begin(); it != arguments.end(); it++) {
 		argumentValue = &*argsValues++;
 		argumentValue->setName((*it)->id.name.c_str());
 
                 (**it).codeGen(context);
 		StoreInst *inst = new StoreInst(argumentValue, context.locals()[(*it)->id.name], false, bblock);
 	}
+
+        auto &data = context.functions[function];
+        for (auto it = arguments.begin(); it != arguments.end(); it++) {
+            auto &&name = (*it)->id.name;
+            data.argumentNames.push_back(name);
+        }
 	
 	block.codeGen(context);
 	ReturnInst::Create(context.TheContext, context.getCurrentReturnValue(), bblock);
@@ -362,8 +427,41 @@ Value* NStructDeclaration::codeGen(CodeGenContext& context)
     Struct &str = context.structs[id.name];
     str.type = type;
     str.fields.reserve(elements.size());
+    context.structsByType[type] = &str;
     for (auto &&el: elements) {
         str.fields.push_back(el->id.name);
     }
     return 0;
+}
+
+Value *NTuple::codeGen(CodeGenContext& context)
+{
+    auto name = std::string("tuple") + std::to_string(context.tuples.size());
+    std::cout << "Creating tuple declaration " << name << expressions.size()<<"\n";
+
+    std::vector<Value *> values;
+    std::vector<Type *> argTypes;
+    for (auto &&expr: expressions) {
+        auto value = expr->codeGen(context);
+        values.push_back(value);
+        argTypes.push_back(value->getType());
+    }
+
+    StructType *type = StructType::create(context.TheContext, argTypes, name.c_str());
+    Tuple &tuple = context.tuples[type];
+    tuple.type = type;
+
+    AllocaInst *alloc = new AllocaInst(type, name.c_str(), context.currentBlock()->block);
+
+    int id = 0;
+    for (auto &&v: values) {
+        auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
+        auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id++, false));
+
+        auto value = GetElementPtrInst::CreateInBounds(alloc, {id1, id2}, "", context.currentBlock()->block);
+        new StoreInst(v, value, false, context.currentBlock()->block);
+    }
+
+//     return new LoadInst(alloc, "", false, context.currentBlock()->block);
+    return alloc;
 }

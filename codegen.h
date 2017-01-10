@@ -36,12 +36,24 @@ struct Struct {
     std::vector<std::string> fields;
 };
 
+struct FunctionData {
+    std::vector<std::string> argumentNames;
+    std::string varargsName;
+};
+
+struct Tuple {
+    Type *type;
+};
+
 class CodeGenContext {
     std::stack<CodeGenBlock *> blocks;
     Function *mainFunction;
 
 public:
     std::unordered_map<std::string, Struct> structs;
+    std::unordered_map<Type *, Struct *> structsByType;
+    std::unordered_map<Type *, Tuple> tuples;
+    std::unordered_map<Function *, FunctionData> functions;
     Module *module;
     LLVMContext TheContext;
     CodeGenContext() { module = new Module("main", TheContext); }

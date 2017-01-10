@@ -23,7 +23,6 @@ static std::string strbuf;
 "struct"                    return TOKEN(TSTRUCT);
 "func"                      return TOKEN(TFUNC);
 
-
 \"                           { BEGIN stringliteral; strbuf.clear(); }
 <stringliteral>[^\\"\n]*     { strbuf += yytext; }
 <stringliteral>\\n           { strbuf += '\n'; }
@@ -32,6 +31,7 @@ static std::string strbuf;
 
 
 [a-zA-Z_][a-zA-Z0-9_]*  SAVE_TOKEN; return TIDENTIFIER;
+"..."                       SAVE_TOKEN; return TIDENTIFIER;
 [0-9]+\.[0-9]* 			    SAVE_TOKEN; return TDOUBLE;
 [0-9]+					        SAVE_TOKEN; return TINTEGER;
 
@@ -47,6 +47,8 @@ static std::string strbuf;
 ")"					          	return TOKEN(TRPAREN);
 "{"         						return TOKEN(TLBRACE);
 "}"					          	return TOKEN(TRBRACE);
+"["                         return TOKEN(TLBRACKET);
+"]"                         return TOKEN(TRBRACKET);
 
 "."         						return TOKEN(TDOT);
 ","				          		return TOKEN(TCOMMA);
