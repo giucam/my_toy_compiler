@@ -1,6 +1,13 @@
+
+#ifndef NODE_H
+#define NODE_H
+
 #include <iostream>
 #include <vector>
+#include <memory>
 #include <llvm/IR/Value.h>
+
+#include "lexer.h"
 
 class CodeGenContext;
 class NStatement;
@@ -13,171 +20,235 @@ class NFunctionDeclaration;
 class NImplDeclaration;
 
 typedef std::vector<NStatement*> StatementList;
-typedef std::vector<NExpression*> ExpressionList;
-typedef std::vector<NVariableDeclaration*> VariableList;
+typedef std::vector<std::unique_ptr<NExpression>> ExpressionList;
+typedef std::vector<NVariableDeclaration *> VariableList;
 typedef std::vector<NAssignment *> AssignmentList;
-typedef std::vector<NIfaceParameter *> NIfaceParameterList;
+typedef std::vector<NIfaceParameter> NIfaceParameterList;
 typedef std::vector<NIfacePrototype *> NIfacePrototypeList;
 typedef std::vector<NFunctionDeclaration *> FuncDeclarationList;
 
 class Node {
 public:
-	virtual ~Node() {}
-	virtual llvm::Value* codeGen(CodeGenContext& context) { return NULL; }
+    Node() {}
+    Node(const Token &token) : m_token(token) {}
+    virtual ~Node() {}
+    virtual llvm::Value* codeGen(CodeGenContext& context) { return NULL; }
+
+    const Token &token() const { return m_token; }
+
+private:
+    Token m_token;
 };
 
-class NExpression : public Node {
+class TypeName
+{
+public:
+    TypeName() {}
+    TypeName(const Token &tok, const std::string &name) : m_token(tok), m_name(name) {}
+
+    const Token &token() const { return m_token; }
+    bool valid() const { return !m_name.empty(); }
+    const std::string &name() const { return m_name; }
+private:
+    Token m_token;
+    std::string m_name;
+};
+
+class NExpression : public Node
+{
+public:
+    NExpression() : m_context(nullptr) {}
+    NExpression(const Token &tok) : Node(tok), m_context(nullptr) {}
+    NExpression(const NExpression &) = delete;
+    void pushContext(NExpression *context) { m_context = context; }
+    NExpression *context() const { return m_context; }
+
+    void attach(std::unique_ptr<NExpression> ex) { m_attached.push_back(std::move(ex)); }
+
+    virtual llvm::Value *load(CodeGenContext &context) { return codeGen(context); }
+    virtual std::vector<llvm::Value *> unpack(CodeGenContext &context) { return { load(context) }; }
+
+private:
+    NExpression *m_context;
+    std::vector<std::unique_ptr<NExpression>> m_attached;
 };
 
 class NStatement : public Node {
+public:
+    NStatement() {}
+    NStatement(const Token &tok) : Node(tok) {}
 };
 
 class NInteger : public NExpression {
 public:
 	long long value;
-	NInteger(long long value) : value(value) { }
+	NInteger(long long value) : NExpression(), value(value) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
 class NDouble : public NExpression {
 public:
 	double value;
-	NDouble(double value) : value(value) { }
+	NDouble(double value) : NExpression(), value(value) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
 class NString : public NExpression {
 public:
     std::string value;
-    NString(std::string *val) : value(*val) {}
+    NString(const std::string &val) : NExpression(), value(val) {}
 
     virtual llvm::Value* codeGen(CodeGenContext& context) override;
 };
 
+class NExpressionPack : public NExpression {
+public:
+    NExpressionPack(const Token &tok, ExpressionList &l) : NExpression(tok), m_list(std::move(l)) {}
+
+    llvm::Value *codeGen(CodeGenContext &context) override;
+    std::vector<llvm::Value *> unpack(CodeGenContext &context) override;
+
+private:
+    ExpressionList m_list;
+};
+
 class NIdentifier : public NExpression {
 public:
-        const NIdentifier *parent;
-        union {
-            std::string name;
-            int index;
-        };
-        enum {
-            Name,
-            Index
-        } type;
-	NIdentifier(const std::string& name) : parent(nullptr), name(name), type(Name) { }
-	NIdentifier(const NIdentifier *p, const std::string &name) : parent(p), name(name), type(Name) {}
-	NIdentifier(const NIdentifier *p, int index) : parent(p), index(index), type(Index) {}
-	~NIdentifier() {}
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    NIdentifier(const Token &token, const std::string &name) : NExpression(token), name(name), type(Name) { }
+    NIdentifier(const Token &token, int index) : NExpression(token), index(index), type(Index) {}
+//     NIdentifier(const NIdentifier &i) : NExpression(), parent(i.parent), type(i.type) { if (i.type == Name) { new (&name) std::string(i.name); } else { index = i.index; } }
+    ~NIdentifier() {}
+
+    llvm::Value *codeGen(CodeGenContext &context) override;
+    llvm::Value *load(CodeGenContext &context) override;
+
+    union {
+        std::string name;
+        int index;
+    };
+    enum {
+        Name,
+        Index
+    } type;
 };
 
 class NMethodCall : public NExpression {
 public:
-	const NIdentifier& id;
-	AssignmentList arguments;
-	NMethodCall(const NIdentifier& id, AssignmentList& arguments) :
-		id(id), arguments(arguments) { }
-	NMethodCall(const NIdentifier& id) : id(id) { }
+	const std::string name;
+	ExpressionList arguments;
+
+	NMethodCall(const Token &tok, const std::string &name, ExpressionList &args) :
+		 NExpression(tok), name(name) { std::swap(arguments, args); }
+// 	NMethodCall(const std::string &name) : NExpression(), name(name) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
 class NBinaryOperator : public NExpression {
 public:
-	int op;
-	NExpression& lhs;
-	NExpression& rhs;
-	NBinaryOperator(NExpression& lhs, int op, NExpression& rhs) :
-		lhs(lhs), rhs(rhs), op(op) { }
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    enum class OP {
+        Mul,
+        Add,
+    };
+
+    OP op;
+    std::unique_ptr<NExpression> lhs;
+    std::unique_ptr<NExpression> rhs;
+    NBinaryOperator(std::unique_ptr<NExpression> lhs, OP op, std::unique_ptr<NExpression> rhs) :
+                NExpression(), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
+    virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
 class NAssignment : public NExpression {
 public:
-	const NIdentifier& lhs;
-	NExpression& rhs;
-        llvm::Value *rhsValue;
-	NAssignment(const NIdentifier& lhs, NExpression& rhs) :
-		lhs(lhs), rhs(rhs), rhsValue(nullptr) { }
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    std::unique_ptr<NExpression> lhs;
+    std::unique_ptr<NExpression> rhs;
+    llvm::Value *rhsValue;
+    NAssignment(std::unique_ptr<NExpression> lhs, std::unique_ptr<NExpression> rhs)
+        : NExpression(), lhs(std::move(lhs)), rhs(std::move(rhs)), rhsValue(nullptr) { }
 
-        llvm::Value *genRhs(CodeGenContext &context);
+    llvm::Value *codeGen(CodeGenContext &context) override;
+
+    llvm::Value *genRhs(CodeGenContext &context);
 };
 
 class NBlock : public NExpression {
 public:
 	StatementList statements;
-	NBlock() { }
+	NBlock(): NExpression() { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
 class NExpressionStatement : public NStatement {
 public:
-	NExpression& expression;
-	NExpressionStatement(NExpression& expression) : 
-		expression(expression) { }
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    NExpressionStatement(std::unique_ptr<NExpression> expression)
+        : expression(std::move(expression)) { }
+
+    llvm::Value* codeGen(CodeGenContext &context) override;
+
+private:
+    std::unique_ptr<NExpression> expression;
 };
 
 class NReturnStatement : public NStatement {
 public:
-	NExpression& expression;
-	NReturnStatement(NExpression& expression) : 
-		expression(expression) { }
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    NReturnStatement(std::unique_ptr<NExpression> expression)
+        : expression(std::move(expression)) { }
+
+    llvm::Value *codeGen(CodeGenContext &context) override;
+
+private:
+    std::unique_ptr<NExpression> expression;
 };
 
 class NVariableDeclaration : public NStatement {
 public:
-	const NIdentifier *type;
-	NIdentifier& id;
-        AssignmentList expressions;
-	NVariableDeclaration(const NIdentifier *type, NIdentifier& id) :
-		type(type), id(id) { }
-	NVariableDeclaration(const NIdentifier *type, NIdentifier& id, NAssignment *assignmentExpr) :
-		type(type), id(id), expressions({ assignmentExpr }) { }
-        NVariableDeclaration(const NIdentifier *type, NIdentifier& id, AssignmentList exprs) :
-		type(type), id(id), expressions(exprs) { }
-        NVariableDeclaration(NIdentifier &id, NAssignment *expr) : type(nullptr), id(id), expressions({ expr }) {}
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    TypeName type;
+    std::string id;
+    AssignmentList expressions;
+    NVariableDeclaration(const Token &tok, const std::string &name, const TypeName &type) : NStatement(tok), type(type), id(name) { }
+    NVariableDeclaration(const Token &tok, const std::string &name, const TypeName &type, NAssignment *assignmentExpr) : NStatement(tok), type(type), id(name), expressions({ assignmentExpr }) { }
+    NVariableDeclaration(const Token &tok, const std::string &name, const TypeName &type, AssignmentList exprs) : NStatement(tok), type(type), id(name), expressions(exprs) { }
+    NVariableDeclaration(const Token &tok, const std::string &name, NAssignment *expr) : NStatement(tok), id(name), expressions({ expr }) {}
+
+    llvm::Value *codeGen(CodeGenContext& context) override;
 };
 
 class NExternDeclaration : public NStatement {
 public:
-    const NIdentifier& type;
-    const NIdentifier& id;
-    VariableList arguments;
-    bool varargs;
-    NExternDeclaration(const NIdentifier& type, const NIdentifier& id,
-            const VariableList& arguments, bool varargs) :
-        type(type), id(id), arguments(arguments), varargs(varargs) {}
-    virtual llvm::Value* codeGen(CodeGenContext& context);
+    TypeName type;
+    std::string id;
+    std::vector<NVariableDeclaration> arguments;
+    NExternDeclaration(const std::string &id, const TypeName &type, const std::vector<NVariableDeclaration> &arguments) :
+        type(type), id(id), arguments(arguments) {}
+
+    llvm::Value *codeGen(CodeGenContext &context) override;
 };
 
 class NFunctionDeclaration : public NStatement {
 public:
-	const NIdentifier& type;
-	NIdentifier& id;
-	VariableList arguments;
-	NBlock& block;
-	NFunctionDeclaration(const NIdentifier& type, NIdentifier& id,
-			const VariableList& arguments, NBlock& block) :
-		type(type), id(id), arguments(arguments), block(block) { }
-	virtual llvm::Value* codeGen(CodeGenContext& context);
+    TypeName type;
+    std::string id;
+    std::vector<NVariableDeclaration> arguments;
+    NBlock *block;
+    NFunctionDeclaration(const std::string &id, const TypeName &type,
+                         const std::vector<NVariableDeclaration> &arguments, NBlock *block) :
+                            type(type), id(id), arguments(arguments), block(block) { }
+
+    llvm::Value *codeGen(CodeGenContext &context) override;
 };
 
 class NStructDeclaration : public NStatement {
 public:
-    const NIdentifier &id;
-    VariableList elements;
-    NStructDeclaration(const NIdentifier &id, const VariableList &elements) : id(id), elements(elements) {}
+    std::string id;
+    std::vector<NVariableDeclaration> elements;
+    NStructDeclaration(const std::string &id, const std::vector<NVariableDeclaration> &elements) : id(id), elements(elements) {}
 
-    llvm::Value* codeGen(CodeGenContext& context) override;
+    llvm::Value *codeGen(CodeGenContext& context) override;
 };
 
 class NTuple : public NExpression {
 public:
-    NTuple() {}
+    NTuple(): NExpression() {}
     void add(NExpression *expr) { expressions.push_back(expr); }
 
     llvm::Value *codeGen(CodeGenContext& context) override;
@@ -187,7 +258,7 @@ public:
 
 class NIfaceDeclaration: public NStatement {
 public:
-    NIfaceDeclaration(const std::string &name, NIfaceParameterList *par, NIfacePrototypeList *pro) : name(name) { std::swap(parameters, *par); std::swap(prototypes, *pro); }
+    NIfaceDeclaration(const std::string &name, NIfaceParameterList &par, NIfacePrototypeList &pro) : name(name) { std::swap(parameters, par); std::swap(prototypes, pro); }
     llvm::Value *codeGen(CodeGenContext& context) override;
 
     std::string name;
@@ -196,19 +267,21 @@ public:
     std::vector<NImplDeclaration *> implementations;
 };
 
-class NIfaceParameter : public Node {
+class NIfaceParameter {
 public:
-    NIfaceParameter(const std::string &name) : name(name) {}
+    NIfaceParameter(const Token &tok, const std::string &name) : m_token(tok), m_name(name) {}
 
-//     llvm::Value *codeGen(CodeGenContext& context) override;
+    const Token &token() const { return m_token; }
+    const std::string &name() const { return m_name; }
 
-    std::string name;
+private:
+    Token m_token;
+    std::string m_name;
 };
 
 class NIfacePrototype : public NStatement {
 public:
-    NIfacePrototype(const std::string &name, NIfaceParameterList *par) : name(name) { std::swap(parameters, *par); }
-//     llvm::Value *codeGen(CodeGenContext& context) override;
+    NIfacePrototype(const std::string &name, NIfaceParameterList &par) : name(name) { std::swap(parameters, par); }
 
     std::string name;
     NIfaceParameterList parameters;
@@ -218,7 +291,7 @@ public:
 class NImplDeclaration : public NStatement
 {
 public:
-    NImplDeclaration(const std::string &name, NIfaceParameterList *par, FuncDeclarationList *funcs) : name(name) { std::swap(parameters, *par); std::swap(functions, *funcs); }
+    NImplDeclaration(const std::string &name, NIfaceParameterList &par, FuncDeclarationList &funcs) : name(name) { std::swap(parameters, par); std::swap(functions, funcs); }
 
     llvm::Value *codeGen(CodeGenContext& context) override;
 
@@ -228,3 +301,5 @@ public:
     FuncDeclarationList functions;
     std::vector<llvm::Type *> parameterTypes;
 };
+
+#endif

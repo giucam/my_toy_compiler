@@ -1,23 +1,37 @@
 #include <iostream>
+
 #include "codegen.h"
 #include "node.h"
+#include "parser.h"
+#include "common.h"
 
 using namespace std;
 
-extern int yyparse();
-extern NBlock* programBlock;
+static void usage()
+{
+    fmt::print(stderr, "usage:\n");
+    exit(1);
+}
 
 int main(int argc, char **argv)
 {
-	yyparse();
-    // see http://comments.gmane.org/gmane.comp.compilers.llvm.devel/33877
-	InitializeNativeTarget();
-	InitializeNativeTargetAsmPrinter();
-	InitializeNativeTargetAsmParser();
+    if (argc < 3) {
+        usage();
+    }
 
-	CodeGenContext context;
-	context.generateCode(*programBlock);
-	
-	return 0;
+    NBlock programBlock;
+
+    Parser parser(argv[1]);
+    parser.parse(&programBlock);
+
+    InitializeNativeTarget();
+//     InitializeNativeTargetAsmPrinter();
+//     InitializeNativeTargetAsmParser();
+
+    CodeGenContext context;
+    context.generateCode(programBlock);
+    context.writeOutput(argv[2]);
+
+    return 0;
 }
 

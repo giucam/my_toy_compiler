@@ -26,13 +26,13 @@ iface printable(A) {
 
 impl printable(i32) {
     func print(value: i32): void {
-        printf(format = "%d",  args = [ value ]);
+        printf("%d\n", value);
     }
 }
 
 impl printable(f64) {
     func print(value: f64): void {
-        printf(format = "%f",  args = [ value ]);
+        printf("%f\n", value);
     }
 }
 
@@ -60,21 +60,34 @@ func main(): i32 {
     let sss: S1 = { f = gg };
     let bla: foo = { ddd = 3, pupu = gg, s1 = sss };
 
-    let tuple = [ 3, "rew", [ "tre" ] ];
+//     gg=3;
+    bla.s1.f=4;
+    print(bla.s1.f * 4);
 
-    let m = do_math(a = bla.ddd, b = bla.s1.f);
+    print(5.4);
 
-    let fm = do_math(a = 3.4, b = 1.2);
-//let m = do_math(a = 4, b = 5)
-    //echo(toPrint = m)
-    //printi(val=3)
+    let tuple = ( 3, "rew", (4.5, 2) );
+    print((tuple.2.1 *3)+3);
 
+//     let (t1, t2) = (3, 9);
+
+    let m = do_math(bla.ddd, bla.s1.f);
+//
+    let fm = do_math(3.4, 1.2);
+// // //let m = do_math(a = 4, b = 5)
+// //     //echo(toPrint = m)
+// //     //printi(val=3)
+// //
     let s = "printf 1: '%s' 2: '%f' 3: '%d'\n";
+//
+    printf(s, "blab", fm, tuple.2.1 * 4);
+    puts("llll");
 
-    printf(format = s, args = [ "blab", fm, 56 * tuple.0 ]);
-    puts(val = tuple.2.0);
-
-    print(value = 3.3);
+    print(3.3);
+    3.3.print();
+    do_math(3, 1).print();
+    3.do_math(1).print();
+    (3, 1).do_math().print();
 
     return 0;
 }

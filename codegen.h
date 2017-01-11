@@ -30,7 +30,6 @@ public:
     BasicBlock *block;
     Value *returnValue;
     std::map<std::string, Value*> locals;
-    NIdentifier *currentId;
 };
 
 struct Struct {
@@ -64,9 +63,10 @@ public:
     LLVMContext TheContext;
     CodeGenContext() { module = new Module("main", TheContext); }
 
-    Value *findValue(const NIdentifier &ident, const NIdentifier *parent);
+    Value *findValue(const NIdentifier &ident);
 
     void generateCode(NBlock& root);
+    void writeOutput(const std::string &filename);
     GenericValue runCode();
     std::map<std::string, Value*>& locals() { return blocks.top()->locals; }
     CodeGenBlock *currentBlock() { return blocks.top(); }
