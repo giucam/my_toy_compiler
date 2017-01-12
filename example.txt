@@ -54,6 +54,11 @@ struct foo {
     s1: S1;
 }
 
+func onfoo(a: foo): void
+{
+    print(a.s1.f);
+}
+
 func main(): i32 {
     let gg = 6;
     let sss: S1 = { f = gg };
@@ -87,6 +92,8 @@ func main(): i32 {
     do_math(3, 1).print();
     3.do_math(1).print();
     (3, 1).do_math().print();
+
+    onfoo(bla);
 
     return 0;
 }

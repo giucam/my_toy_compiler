@@ -215,12 +215,28 @@ public:
     llvm::Value *codeGen(CodeGenContext& context) override;
 };
 
+class NFunctionArgumentDeclaration : public NStatement
+{
+public:
+    NFunctionArgumentDeclaration(const Token &tok, const std::string &name, const TypeName &type) : NStatement(tok), m_name(name), m_type(type) {}
+
+    const std::string &name() const { return m_name; }
+    const TypeName &type() const { return m_type; }
+
+    llvm::Value *codeGen(CodeGenContext& context) override;
+
+private:
+    Token m_token;
+    std::string m_name;
+    TypeName m_type;
+};
+
 class NExternDeclaration : public NStatement {
 public:
     TypeName type;
     std::string id;
-    std::vector<NVariableDeclaration> arguments;
-    NExternDeclaration(const std::string &id, const TypeName &type, const std::vector<NVariableDeclaration> &arguments) :
+    std::vector<NFunctionArgumentDeclaration> arguments;
+    NExternDeclaration(const std::string &id, const TypeName &type, const std::vector<NFunctionArgumentDeclaration> &arguments) :
         type(type), id(id), arguments(arguments) {}
 
     llvm::Value *codeGen(CodeGenContext &context) override;
@@ -230,10 +246,10 @@ class NFunctionDeclaration : public NStatement {
 public:
     TypeName type;
     std::string id;
-    std::vector<NVariableDeclaration> arguments;
+    std::vector<NFunctionArgumentDeclaration> arguments;
     NBlock *block;
     NFunctionDeclaration(const std::string &id, const TypeName &type,
-                         const std::vector<NVariableDeclaration> &arguments, NBlock *block) :
+                         const std::vector<NFunctionArgumentDeclaration> &arguments, NBlock *block) :
                             type(type), id(id), arguments(arguments), block(block) { }
 
     llvm::Value *codeGen(CodeGenContext &context) override;

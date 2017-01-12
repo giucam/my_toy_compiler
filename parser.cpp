@@ -443,7 +443,7 @@ void Parser::parseExtern()
     auto nameTok = nextToken(Token::Type::Identifier);
     auto leftParensTok = nextToken(Token::Type::LeftParens);
 
-    std::vector<NVariableDeclaration> list;
+    std::vector<NFunctionArgumentDeclaration> list;
     auto tok = nextToken();
     while (true) {
         if (tok.type() == Token::Type::RightParens) {
@@ -478,7 +478,7 @@ NFunctionDeclaration *Parser::parseFunc()
     auto nameTok = nextToken(Token::Type::Identifier);
     auto leftParensTok = nextToken(Token::Type::LeftParens);
 
-    std::vector<NVariableDeclaration> list;
+    std::vector<NFunctionArgumentDeclaration> list;
     auto tok = nextToken();
     while (true) {
         if (tok.type() == Token::Type::RightParens) {

@@ -61,20 +61,20 @@ GenericValue CodeGenContext::runCode() {
 }
 
 /* Returns an LLVM type based on the identifier */
-static Type *typeOf(const Token &tok, const std::string &name, CodeGenContext& context)
+static Type *typeOf(const TypeName &type, CodeGenContext& context)
 {
-    if (name.compare("i32") == 0) {
+    if (type.name().compare("i32") == 0) {
             return Type::getInt32Ty(context.TheContext);
-    } else if (name.compare("f64") == 0) {
+    } else if (type.name().compare("f64") == 0) {
         return Type::getDoubleTy(context.TheContext);
-    } else if (name.compare("void") == 0) {
+    } else if (type.name().compare("void") == 0) {
         return Type::getVoidTy(context.TheContext);
-    } else if (name.compare("string") == 0) {
+    } else if (type.name().compare("string") == 0) {
         return Type::getInt8PtrTy(context.TheContext);
-    } else if (context.structs.find(name) != context.structs.end()) {
-        return context.structs[name].type;
+    } else if (context.structs.find(type.name()) != context.structs.end()) {
+        return context.structs[type.name()].type;
     }
-    err(tok, "type '{}' was not declared in this scope", name);
+    err(type.token(), "type '{}' was not declared in this scope", type.name());
     return nullptr; //silence the warning
 }
 
@@ -478,7 +478,7 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
             auto value = expressions.front()->genRhs(context);
             return value->getType();
         }
-        return typeOf(type.token(), type.name(), context);
+        return typeOf(type, context);
     }();
 
     AllocaInst *alloc = new AllocaInst(t, id.c_str(), context.currentBlock()->block);
@@ -503,24 +503,31 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
     return alloc;
 }
 
+Value *NFunctionArgumentDeclaration::codeGen(CodeGenContext &context)
+{
+    AllocaInst *alloc = new AllocaInst(typeOf(type(), context), name().c_str(), context.currentBlock()->block);
+    context.locals()[name()] = alloc;
+    return alloc;
+}
+
 Value* NExternDeclaration::codeGen(CodeGenContext& context)
 {
     vector<Type*> argTypes;
     bool varargs = false;
     for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        if (it->type.name() == "...") {
+        if (it->type().name() == "...") {
             varargs = true;
             continue;
         }
-        argTypes.push_back(typeOf(it->type.token(), it->type.name(), context));
+        argTypes.push_back(typeOf(it->type(), context));
     }
-    FunctionType *ftype = FunctionType::get(typeOf(type.token(), type.name(), context), makeArrayRef(argTypes), varargs);
+    FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), varargs);
     Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.c_str(), context.module);
 
     auto &data = context.functions[function];
     for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        auto &&name = it->id;
-        if (it->type.name() == "...") {
+        auto &&name = it->name();
+        if (it->type().name() == "...") {
             data.varargsName = name;
             continue;
         }
@@ -539,9 +546,9 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 
 	vector<Type*> argTypes;
 	for (auto it = arguments.begin(); it != arguments.end(); it++) {
-            argTypes.push_back(typeOf(it->type.token(), it->type.name(), context));
+            argTypes.push_back(typeOf(it->type(), context));
 	}
-	FunctionType *ftype = FunctionType::get(typeOf(type.token(), type.name(), context), makeArrayRef(argTypes), false);
+	FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), false);
 	Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.c_str(), context.module);
 	BasicBlock *bblock = BasicBlock::Create(context.TheContext, "entry", function, 0);
 
@@ -552,15 +559,15 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 
 	for (auto it = arguments.begin(); it != arguments.end(); it++) {
 		argumentValue = &*argsValues++;
-		argumentValue->setName(it->id.c_str());
+		argumentValue->setName(it->name().c_str());
 
                 it->codeGen(context);
-		StoreInst *inst = new StoreInst(argumentValue, context.locals()[it->id], false, bblock);
+		StoreInst *inst = new StoreInst(argumentValue, context.locals()[it->name()], false, bblock);
 	}
 
         auto &data = context.functions[function];
         for (auto it = arguments.begin(); it != arguments.end(); it++) {
-            auto &&name = it->id;
+            auto &&name = it->name();
             data.argumentNames.push_back(name);
         }
 	
@@ -577,7 +584,7 @@ Value* NStructDeclaration::codeGen(CodeGenContext& context)
     std::cout << "Creating struct declaration " << " " << id << endl;
     vector<Type *> argTypes;
     for (auto it = elements.begin(); it != elements.end(); it++) {
-        argTypes.push_back(typeOf(it->type.token(), it->type.name(), context));
+        argTypes.push_back(typeOf(it->type, context));
         std::cout<<"    with arg " << it->type.name() << " " <<it->id<<"\n";
     }
     StructType *type = StructType::create(context.TheContext, argTypes, id.c_str());
@@ -675,7 +682,7 @@ Value *NImplDeclaration::codeGen(CodeGenContext &context)
 
     raw_string_ostream stream(id);
     for (auto &&par: parameters) {
-        auto t = typeOf(par.token(), par.name(), context);
+        auto t = typeOf(TypeName(par.token(), par.name()), context);
         t->print(stream);
         parameterTypes.push_back(t);
     }
