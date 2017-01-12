@@ -370,29 +370,44 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
 
 Value* NBinaryOperator::codeGen(CodeGenContext& context)
 {
-	std::cout << "Creating binary operation " << (int)op << endl;
-	Instruction::BinaryOps instr;
-	switch (op) {
-            case OP::Add: 	instr = Instruction::Add; goto math;
-// 		case TMINUS: 	instr = Instruction::Sub; goto math;
-            case OP::Mul: 	instr = Instruction::Mul; goto math;
-// 		case TDIV: 	instr = Instruction::SDiv; goto math;
-
-		/* TODO comparison */
-	}
-
-	return NULL;
-math:
-
-        auto rhsValues = rhs->unpack(context);
-        auto lhsValues = lhs->unpack(context);
-        if (rhsValues.size() != lhsValues.size()) {
-            error("both operands must have the same cardinality");
+    std::cout << "Creating binary operation " << (int)op << endl;
+    auto instructionOp = [&](Type *type) -> int {
+        if (type->isIntegerTy()) {
+            switch (op) {
+                case OP::Add: return Instruction::Add;
+                case OP::Mul: return Instruction::Mul;
+                case OP::Sub: return Instruction::Sub;
+                case OP::Div: return Instruction::SDiv;
+            }
+        } else {
+            switch (op) {
+                case OP::Add: return Instruction::FAdd;
+                case OP::Mul: return Instruction::FMul;
+                case OP::Sub: return Instruction::FSub;
+                case OP::Div: return Instruction::FDiv;
+            }
         }
-        assert(rhsValues.size() == 1);
-        for (size_t i = 0; i < rhsValues.size(); ++i) {
-            return BinaryOperator::Create(instr, lhsValues[i], rhsValues[i], "", context.currentBlock()->block);
+        return -1;
+    };
+
+    auto rhsValues = rhs->unpack(context);
+    auto lhsValues = lhs->unpack(context);
+    if (rhsValues.size() != lhsValues.size()) {
+        error("both operands must have the same cardinality");
+    }
+    assert(rhsValues.size() == 1);
+    for (size_t i = 0; i < rhsValues.size(); ++i) {
+        auto lhst = lhsValues[i]->getType();
+        auto rhst = rhsValues[i]->getType();
+        if (lhst != rhst) {
+            err(token(), "mismatched types in binary operation");
         }
+        auto instr = instructionOp(lhst);
+        if (instr == -1) {
+            err(token(), "invalid operands for binary expression");
+        }
+        return BinaryOperator::Create((Instruction::BinaryOps)instr, lhsValues[i], rhsValues[i], "", context.currentBlock()->block);
+    }
 }
 
 Value* NAssignment::codeGen(CodeGenContext& context)

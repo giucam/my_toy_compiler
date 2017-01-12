@@ -148,6 +148,8 @@ public:
     enum class OP {
         Mul,
         Add,
+        Sub,
+        Div,
     };
 
     OP op;

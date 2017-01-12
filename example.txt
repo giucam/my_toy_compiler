@@ -14,9 +14,8 @@ impl math(i32, i32) {
 
 impl math(f64, f64) {
     func do_math(a: f64, b: f64): f64 {
-//         let x: f64 = a * 5 + b;
-//         return x + 3;
-        return a;
+        let x: f64 = a * 5.8 + b;
+        return x + 3.2;
     }
 }
 
@@ -67,7 +66,7 @@ func main(): i32 {
     print(5.4);
 
     let tuple = ( 3, "rew", (4.5, 2) );
-    print((tuple.2.1 *3)+3);
+    print(tuple.2.1 *3+3);
 
 //     let (t1, t2) = (3, 9);
 
@@ -78,9 +77,9 @@ func main(): i32 {
 // //     //echo(toPrint = m)
 // //     //printi(val=3)
 // //
-    let s = "printf 1: '%s' 2: '%f' 3: '%d'\n";
+    let s = "printf 1: '%s' 2: '%f' 3: '%f'\n";
 //
-    printf(s, "blab", fm, tuple.2.1 * 4);
+    printf(s, "blab", fm, tuple.2.0 * 4.2);
     puts("llll");
 
     print(3.3);
