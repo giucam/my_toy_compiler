@@ -233,13 +233,21 @@ private:
 
 class NExternDeclaration : public NStatement {
 public:
-    TypeName type;
-    std::string id;
-    std::vector<NFunctionArgumentDeclaration> arguments;
-    NExternDeclaration(const std::string &id, const TypeName &type, const std::vector<NFunctionArgumentDeclaration> &arguments) :
-        type(type), id(id), arguments(arguments) {}
+    NExternDeclaration(const std::string &id, const TypeName &type, std::vector<NFunctionArgumentDeclaration> &arguments, bool varargs)
+        : m_type(type), m_name(id), m_varargs(varargs) { std::swap(m_arguments, arguments); }
+
+    const std::string &name() const { return m_name; }
+    const TypeName &returnType() const { return m_type; }
+    const std::vector<NFunctionArgumentDeclaration> &arguments() const { return m_arguments; }
+    bool isVarargs() const { return m_varargs; }
 
     llvm::Value *codeGen(CodeGenContext &context) override;
+
+private:
+    TypeName m_type;
+    std::string m_name;
+    std::vector<NFunctionArgumentDeclaration> m_arguments;
+    bool m_varargs;
 };
 
 class NFunctionDeclaration : public NStatement {

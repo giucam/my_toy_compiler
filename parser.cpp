@@ -445,8 +445,13 @@ void Parser::parseExtern()
 
     std::vector<NFunctionArgumentDeclaration> list;
     auto tok = nextToken();
+    bool varargs = false;
     while (true) {
         if (tok.type() == Token::Type::RightParens) {
+            break;
+        } else if (tok.type() == Token::Type::Ellipsis) {
+            nextToken(Token::Type::RightParens);
+            varargs = true;
             break;
         }
 
@@ -465,7 +470,7 @@ void Parser::parseExtern()
     checkTokenType(nextToken(), Token::Type::Colon);
     auto retTypeTok = nextToken(Token::Type::Identifier);
 
-    auto decl = new NExternDeclaration(nameTok.text(), TypeName(retTypeTok, retTypeTok.text()), list);
+    auto decl = new NExternDeclaration(nameTok.text(), TypeName(retTypeTok, retTypeTok.text()), list, varargs);
     m_block->statements.push_back(decl);
 }
 

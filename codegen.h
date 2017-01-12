@@ -39,7 +39,6 @@ struct Struct {
 
 struct FunctionData {
     std::vector<std::string> argumentNames;
-    std::string varargsName;
 };
 
 struct Tuple {

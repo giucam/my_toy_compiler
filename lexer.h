@@ -37,6 +37,7 @@ public:
         Plus,
         Minus,
         Equal,
+        Ellipsis,
         CompareEqual,
         StringLiteral,
     };
@@ -90,6 +91,7 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(Plus, "'+'")
         TOKSTR(Minus, "'-'")
         TOKSTR(Equal, "'='")
+        TOKSTR(Ellipsis, "'...'")
         TOKSTR(CompareEqual, "'=='")
         TOK(StringLiteral)
     }

@@ -301,74 +301,11 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
         error("no such function '{}'", name);
     }
 
-    auto &&data = context.functions[function];
-
-    std::vector<Value*> args;
-//     args.resize(data.argumentNames.size());
-
-    auto findId = [&](const std::string &name) -> int {
-        int i = 0;
-        for (auto &&a: data.argumentNames) {
-            if (a == name) {
-                return i;
-            }
-            ++i;
-        }
-        if (function->isVarArg() && data.varargsName == name) {
-            return -2;
-        }
-        return -1;
-    };
-
-    Value *varargs = nullptr;
-    for (auto &&v: values) {
-//         int index = findId(v.name);
-//         if (index == -1) {
-//             std::cerr << "Unexpected argument '" << v.name << "' when calling function '" << name << "(";
-//             for (auto i = data.argumentNames.begin(); i != data.argumentNames.end();) {
-//                 auto &&a = *i;
-//
-//                 std::cerr << a;
-//                 if (++i != data.argumentNames.end()) {
-//                     std::cerr << ", ";
-//                 }
-//             }
-//             std::cerr << ")'.\n";
-//             exit(1);
-//         } else if (index == -2) { //varargs
-//             varargs = v.value;
-//             continue;
-//         }
-
-//         args[index] = v.value;
-//         args[index]->dump();
-        args.push_back(v);
-    }
-
-//     if (varargs) {
-//         auto *t = varargs->getType();
-//         t = t->getPointerElementType();
-//         if (context.tuples.find(t) == context.tuples.end()) {
-//             std::cerr << "error: expected a tuple as the varargs argument.\n";
-//             exit(1);
-//         }
-//         auto *st = static_cast<StructType *>(t);
-//
-//         int id = 0;
-//         for (auto &&el: st->elements()) {
-//             auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
-//             auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id++, false));
-//
-//             auto val = GetElementPtrInst::CreateInBounds(varargs, {id1, id2}, "", context.currentBlock()->block);
-//             args.push_back(new LoadInst(val, "", false, context.currentBlock()->block));
-//         }
-//     }
-
-    CallInst *call = CallInst::Create(function, makeArrayRef(args), "", context.currentBlock()->block);
+    CallInst *call = CallInst::Create(function, makeArrayRef(values), "", context.currentBlock()->block);
     return call;
 }
 
-Value* NBinaryOperator::codeGen(CodeGenContext& context)
+Value *NBinaryOperator::codeGen(CodeGenContext& context)
 {
     std::cout << "Creating binary operation " << (int)op << endl;
     auto instructionOp = [&](Type *type) -> int {
@@ -408,6 +345,7 @@ Value* NBinaryOperator::codeGen(CodeGenContext& context)
         }
         return BinaryOperator::Create((Instruction::BinaryOps)instr, lhsValues[i], rhsValues[i], "", context.currentBlock()->block);
     }
+    return nullptr;
 }
 
 Value* NAssignment::codeGen(CodeGenContext& context)
@@ -510,28 +448,19 @@ Value *NFunctionArgumentDeclaration::codeGen(CodeGenContext &context)
     return alloc;
 }
 
-Value* NExternDeclaration::codeGen(CodeGenContext& context)
+Value *NExternDeclaration::codeGen(CodeGenContext &context)
 {
-    vector<Type*> argTypes;
-    bool varargs = false;
-    for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        if (it->type().name() == "...") {
-            varargs = true;
-            continue;
-        }
-        argTypes.push_back(typeOf(it->type(), context));
+    std::vector<Type *> argTypes;
+    argTypes.reserve(arguments().size());
+    for (auto &&arg: arguments()) {
+        argTypes.push_back(typeOf(arg.type(), context));
     }
-    FunctionType *ftype = FunctionType::get(typeOf(type, context), makeArrayRef(argTypes), varargs);
-    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.c_str(), context.module);
+    FunctionType *ftype = FunctionType::get(typeOf(returnType(), context), makeArrayRef(argTypes), isVarargs());
+    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, name().c_str(), context.module);
 
     auto &data = context.functions[function];
-    for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        auto &&name = it->name();
-        if (it->type().name() == "...") {
-            data.varargsName = name;
-            continue;
-        }
-        data.argumentNames.push_back(name);
+    for (auto &&arg: arguments()) {
+        data.argumentNames.push_back(arg.name());
     }
 
     return function;

@@ -1,5 +1,5 @@
 extern puts(val: string): i32
-extern printf(format: string, args: ...): i32
+extern printf(format: string, ...): i32
 
 iface math(A, B) {
     func do_math(A, B);

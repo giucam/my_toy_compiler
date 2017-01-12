@@ -165,8 +165,7 @@ Token Lexer::readNextToken()
                     return token(Token::Type::Unknown);
                 } else {
                     nextChar();
-                    m_text = "...";
-                    return token(Token::Type::Identifier);
+                    return token(Token::Type::Ellipsis);
                 }
             }
         } else if (m_lastChar == '(') {
