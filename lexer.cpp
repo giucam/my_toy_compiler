@@ -217,6 +217,9 @@ Token Lexer::readNextToken()
             } else {
                 return token(Token::Type::Equal);
             }
+        } else if (m_lastChar == '&') {
+            nextChar();
+            return token(Token::Type::Ampersand);
         } else {
             break;
         }

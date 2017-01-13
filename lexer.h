@@ -40,8 +40,9 @@ public:
         Ellipsis,
         CompareEqual,
         StringLiteral,
+        Ampersand,
     };
-    Token() {}
+    Token() : m_lineno(0), m_columnno(0) {}
     Token(Type t, int l, int c, const std::string &filename, const std::string &txt, const std::string &line): m_type(t), m_lineno(l), m_columnno(c), m_filename(filename), m_line(line), m_text(txt) {}
 
     Type type() const { return m_type; }
@@ -94,6 +95,7 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(Ellipsis, "'...'")
         TOKSTR(CompareEqual, "'=='")
         TOK(StringLiteral)
+        TOKSTR(Ampersand, "'&'")
     }
 #undef TOK
     return s;

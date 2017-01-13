@@ -35,7 +35,6 @@ impl printable(f64) {
     }
 }
 
-
 // func do_math(a: i32, b: i32): i32 {
 //     let x: i32 = a * 5 + b;
 //     return x + 3;
@@ -51,49 +50,70 @@ struct S1 {
 struct foo {
     ddd: i32;
     pupu: i32;
-    s1: S1;
+    s1: *S1;
 }
 
-func onfoo(a: foo): void
+impl printable(foo) {
+    func print(value: *foo): void {
+        printf("foo: ddd: %d, pupu: %d, s1.f: %d\n", value.ddd, value.pupu, value.s1.f);
+    }
+}
+
+impl printable(S1) {
+    func print(value: S1): void {
+        printf("S1: %d\n", value.f);
+    }
+}
+
+func onfoo(a: *foo): *foo
 {
-    print(a.s1.f);
+    a.s1.f = 9;
+    a.ddd = 99;
+    return a;
 }
 
 func main(): i32 {
-    let gg = 6;
-    let sss: S1 = { f = gg };
-    let bla: foo = { ddd = 3, pupu = gg, s1 = sss };
+//     let gg = 6;
+    let sss: S1 = { f = 3 };
+    let bla: foo = { ddd = 3, pupu = 9, s1 = &sss };
+//     let bla2: foo = { ddd = 3, pupu = 9, s1 = &sss };
 
-//     gg=3;
-    bla.s1.f=4;
-    print(bla.s1.f * 4);
-
-    print(5.4);
-
+// //     gg=3;
+//     bla.s1.f=4;
+//     print(bla.s1.f * 4);
+//
+//     print(5.4);
+//
     let tuple = ( 3, "rew", (4.5, 2) );
     print(tuple.2.1 *3+3);
-
-//     let (t1, t2) = (3, 9);
-
+//
+// //     let (t1, t2) = (3, 9);
+//
     let m = do_math(bla.ddd, bla.s1.f);
-//
-    let fm = do_math(3.4, 1.2);
-// // //let m = do_math(a = 4, b = 5)
-// //     //echo(toPrint = m)
-// //     //printi(val=3)
 // //
+    let fm = do_math(3.4, 1.2);
+// // // //let m = do_math(a = 4, b = 5)
+// // //     //echo(toPrint = m)
+// // //     //printi(val=3)
+// // //
     let s = "printf 1: '%s' 2: '%f' 3: '%f'\n";
-//
+
     printf(s, "blab", fm, tuple.2.0 * 4.2);
-    puts("llll");
+//     puts("llll");
+//
+//     print(3.3);
+//     3.3.print();
+//     do_math(3, 1).print();
+//     3.do_math(1).print();
+//     (3, 1).do_math().print();
 
-    print(3.3);
-    3.3.print();
-    do_math(3, 1).print();
-    3.do_math(1).print();
-    (3, 1).do_math().print();
+//     onfoo(&bla);
+    bla.print();
+    bla.onfoo().print();
+    print(bla);
+//     print(bla.ddd);
 
-    onfoo(bla);
+//     printf("ll %d\n",bla.ddd);
 
     return 0;
 }

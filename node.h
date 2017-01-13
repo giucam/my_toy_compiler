@@ -44,14 +44,16 @@ class TypeName
 {
 public:
     TypeName() {}
-    TypeName(const Token &tok, const std::string &name) : m_token(tok), m_name(name) {}
+    TypeName(const Token &tok, const std::string &name, int pointer = 0) : m_token(tok), m_name(name), m_pointer(pointer) {}
 
     const Token &token() const { return m_token; }
     bool valid() const { return !m_name.empty(); }
     const std::string &name() const { return m_name; }
+    int pointer() const { return m_pointer; }
 private:
     Token m_token;
     std::string m_name;
+    int m_pointer;
 };
 
 class NExpression : public Node
@@ -66,7 +68,7 @@ public:
     void attach(std::unique_ptr<NExpression> ex) { m_attached.push_back(std::move(ex)); }
 
     virtual llvm::Value *load(CodeGenContext &context) { return codeGen(context); }
-    virtual std::vector<llvm::Value *> unpack(CodeGenContext &context) { return { load(context) }; }
+    virtual std::vector<NExpression *> unpack() { return { this }; }
 
 private:
     NExpression *m_context;
@@ -82,14 +84,14 @@ public:
 class NInteger : public NExpression {
 public:
 	long long value;
-	NInteger(long long value) : NExpression(), value(value) { }
+	NInteger(const Token &tok, long long value) : NExpression(tok), value(value) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
 class NDouble : public NExpression {
 public:
 	double value;
-	NDouble(double value) : NExpression(), value(value) { }
+	NDouble(const Token &tok, double value) : NExpression(tok), value(value) { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
 };
 
@@ -106,7 +108,7 @@ public:
     NExpressionPack(const Token &tok, ExpressionList &l) : NExpression(tok), m_list(std::move(l)) {}
 
     llvm::Value *codeGen(CodeGenContext &context) override;
-    std::vector<llvm::Value *> unpack(CodeGenContext &context) override;
+    std::vector<NExpression *> unpack() override;
 
 private:
     ExpressionList m_list;
@@ -178,6 +180,19 @@ public:
 	StatementList statements;
 	NBlock(): NExpression() { }
 	virtual llvm::Value* codeGen(CodeGenContext& context);
+};
+
+class NAddressOfExpression : public NExpression
+{
+public:
+    NAddressOfExpression(const Token &token, std::unique_ptr<NExpression> expr) : NExpression(token), m_expression(std::move(expr)) {}
+
+    NExpression *expression() const { return m_expression.get(); }
+
+    llvm::Value *codeGen(CodeGenContext &context) override;
+
+private:
+    std::unique_ptr<NExpression> m_expression;
 };
 
 class NExpressionStatement : public NStatement {

@@ -26,11 +26,7 @@ Parser::Parser(const std::string &filename)
 void Parser::checkTokenType(const Token &tok, Token::Type expected) const
 {
     if (tok.type() != expected) {
-        if (expected == Token::Type::Identifier) {
-            err(tok, "expected identifier");
-        } else {
-            err(tok, "wrong token found: expected {}, found {}", expected, tok.type());
-        }
+        err(tok, "wrong token found: expected {}, found {}", expected, tok.type());
     }
 }
 
@@ -131,9 +127,9 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
         if (m_lexer.peekToken(1).type() == Token::Type::Dot && m_lexer.peekToken(2).type() == Token::Type::Numeric) {
             nextToken();
             auto decTok = nextToken();
-            return std::make_unique<NDouble>(std::stof(tok.text() + "." + decTok.text()));
+            return std::make_unique<NDouble>(tok, std::stof(tok.text() + "." + decTok.text()));
         }
-        return std::make_unique<NInteger>(std::stol(tok.text()));
+        return std::make_unique<NInteger>(tok, std::stol(tok.text()));
     } else if (tok.type() == Token::Type::StringLiteral) {
         nextToken();
         return std::make_unique<NString>(tok.text());
@@ -141,6 +137,10 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
         ExpressionList list = parseExpressionList();
 
         return std::make_unique<NExpressionPack>(tok, list);
+    } else if (tok.type() == Token::Type::Ampersand) {
+        nextToken();
+        checkTokenType(m_lexer.peekToken(), Token::Type::Identifier);
+        return std::make_unique<NAddressOfExpression>(tok, parseExpression());
     }
     return nullptr;
 }
@@ -170,19 +170,7 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
             }
             case Token::Type::Star:
             case Token::Type::Plus: {
-//                 nextToken();
-
                 expr = parseBinOp(std::move(expr), 0);
-//                 auto rhs = parseExpression();
-//                 NBinaryOperator::OP op = [&]() {
-//                     switch (peekType) {
-//                         case Token::Type::Star: return NBinaryOperator::OP::Mul;
-//                         case Token::Type::Plus: return NBinaryOperator::OP::Add;
-//                         default:
-//                             abort();
-//                     }
-//                 }();
-//                 expr = std::make_unique<NBinaryOperator>(std::move(expr), op, std::move(rhs));
                 break;
             }
             default:
@@ -221,7 +209,7 @@ void Parser::parseLet()
         auto id = std::make_unique<NIdentifier>(nameTok, nameTok.text());
         var = new NVariableDeclaration(nameTok, nameTok.text(), new NAssignment(std::move(id), std::move(expr)));
     } else if (tok.type() == Token::Type::Colon) {
-        auto typeTok = nextToken(Token::Type::Identifier);
+        auto type = parseType();
         checkTokenType(nextToken(), Token::Type::Equal);
 
         if (m_lexer.peekToken().type() == Token::Type::LeftBrace) {
@@ -244,12 +232,12 @@ void Parser::parseLet()
                 }
             }
 
-            var = new NVariableDeclaration(nameTok, nameTok.text(), TypeName(typeTok, typeTok.text()), list);
+            var = new NVariableDeclaration(nameTok, nameTok.text(), type, list);
         } else {
             auto expr = parseExpression();
 
             auto id = std::make_unique<NIdentifier>(nameTok, nameTok.text());
-            var = new NVariableDeclaration(nameTok, nameTok.text(), TypeName(typeTok, typeTok.text()), new NAssignment(std::move(id), std::move(expr)));
+            var = new NVariableDeclaration(nameTok, nameTok.text(), type, new NAssignment(std::move(id), std::move(expr)));
         }
     } else {
         err(tok, "':' or '=' expected");
@@ -275,10 +263,10 @@ void Parser::parseStruct()
 
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
-        auto typeTok = nextToken(Token::Type::Identifier);
+        auto type = parseType();
         checkTokenType(nextToken(), Token::Type::Semicolon);
 
-        list.push_back(NVariableDeclaration(tok, tok.text(), TypeName(typeTok, typeTok.text())));
+        list.push_back(NVariableDeclaration(tok, tok.text(), type));
 
         tok = nextToken();
     }
@@ -457,9 +445,8 @@ void Parser::parseExtern()
 
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
-        auto typeTok = nextToken(Token::Type::Identifier);
 
-        list.emplace_back(tok, tok.text(), TypeName(typeTok, typeTok.text()));
+        list.emplace_back(tok, tok.text(), parseType());
 
         tok = nextToken();
         if (tok.type() == Token::Type::Comma) {
@@ -468,10 +455,21 @@ void Parser::parseExtern()
     }
 
     checkTokenType(nextToken(), Token::Type::Colon);
-    auto retTypeTok = nextToken(Token::Type::Identifier);
 
-    auto decl = new NExternDeclaration(nameTok.text(), TypeName(retTypeTok, retTypeTok.text()), list, varargs);
+    auto decl = new NExternDeclaration(nameTok.text(), parseType(), list, varargs);
     m_block->statements.push_back(decl);
+}
+
+TypeName Parser::parseType()
+{
+    int pointer = 0;
+    auto typeTok = nextToken();
+    while (typeTok.type() == Token::Type::Star) {
+        typeTok = nextToken();
+        pointer++;
+    }
+    checkTokenType(typeTok, Token::Type::Identifier);
+    return TypeName(typeTok, typeTok.text(), pointer);
 }
 
 NFunctionDeclaration *Parser::parseFunc()
@@ -492,9 +490,8 @@ NFunctionDeclaration *Parser::parseFunc()
 
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
-        auto typeTok = nextToken(Token::Type::Identifier);
 
-        list.emplace_back(tok, tok.text(), TypeName(typeTok, typeTok.text()));
+        list.emplace_back(tok, tok.text(), parseType());
 
         tok = nextToken();
         if (tok.type() == Token::Type::Comma) {
@@ -503,12 +500,12 @@ NFunctionDeclaration *Parser::parseFunc()
     }
 
     checkTokenType(nextToken(), Token::Type::Colon);
-    auto retTypeTok = nextToken(Token::Type::Identifier);
+    auto retType = parseType();
 
     auto block = parseBlock();
 
 
-    auto decl = new NFunctionDeclaration(nameTok.text(), TypeName(retTypeTok, retTypeTok.text()), list, block);
+    auto decl = new NFunctionDeclaration(nameTok.text(), retType, list, block);
     return decl;
 }
 

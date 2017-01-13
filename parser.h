@@ -34,6 +34,7 @@ private:
     NIfaceParameterList parseParameterList();
     void parseImpl();
     void parseExpressionStatement();
+    TypeName parseType();
 
     std::string m_filename;
     Lexer m_lexer;

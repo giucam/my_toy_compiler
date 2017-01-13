@@ -63,19 +63,28 @@ GenericValue CodeGenContext::runCode() {
 /* Returns an LLVM type based on the identifier */
 static Type *typeOf(const TypeName &type, CodeGenContext& context)
 {
-    if (type.name().compare("i32") == 0) {
+    Type *basicType = [&]() -> Type * {
+        if (type.name().compare("i32") == 0) {
             return Type::getInt32Ty(context.TheContext);
-    } else if (type.name().compare("f64") == 0) {
-        return Type::getDoubleTy(context.TheContext);
-    } else if (type.name().compare("void") == 0) {
-        return Type::getVoidTy(context.TheContext);
-    } else if (type.name().compare("string") == 0) {
-        return Type::getInt8PtrTy(context.TheContext);
-    } else if (context.structs.find(type.name()) != context.structs.end()) {
-        return context.structs[type.name()].type;
+        } else if (type.name() == "u32") {
+            return Type::getInt32Ty(context.TheContext);
+        } else if (type.name().compare("f64") == 0) {
+            return Type::getDoubleTy(context.TheContext);
+        } else if (type.name().compare("void") == 0) {
+            return Type::getVoidTy(context.TheContext);
+        } else if (type.name().compare("string") == 0) {
+            return Type::getInt8PtrTy(context.TheContext);
+        } else if (context.structs.find(type.name()) != context.structs.end()) {
+            return context.structs[type.name()].type;
+        }
+        err(type.token(), "type '{}' was not declared in this scope", type.name());
+        return nullptr; //silence the warning
+    }();
+
+    for (int pointer = type.pointer(); pointer > 0; --pointer) {
+        basicType = basicType->getPointerTo();
     }
-    err(type.token(), "type '{}' was not declared in this scope", type.name());
-    return nullptr; //silence the warning
+    return basicType;
 }
 
 Value *CodeGenContext::findValue(const NIdentifier &ident)
@@ -91,7 +100,7 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
         t->dump();
 
         t = t->getPointerElementType();
-        if (t->isPointerTy()) {
+        while (t->isPointerTy()) {
             parentV = new LoadInst(parentV, "", false, currentBlock()->block);
             t = parentV->getType()->getPointerElementType();
         }
@@ -188,6 +197,11 @@ Value* NIdentifier::load(CodeGenContext& context)
     return new LoadInst(context.findValue(*this), "", false, context.currentBlock()->block);
 }
 
+Value *NAddressOfExpression::codeGen(CodeGenContext& context)
+{
+    return expression()->codeGen(context);
+}
+
 static std::string mangleFuncName(const std::string &name, const std::string &iface, const std::string &sig)
 {
     return iface + sig + "::" + name;
@@ -225,33 +239,52 @@ Value *NExpressionPack::codeGen(CodeGenContext& context)
 }
 
 
-std::vector<llvm::Value *> NExpressionPack::unpack(CodeGenContext &context)
+std::vector<NExpression *> NExpressionPack::unpack()
 {
-    std::vector<llvm::Value *> vec;
+    std::vector<NExpression *> vec;
     for (auto &&ex: m_list) {
-        auto v = ex->unpack(context);
+        auto v = ex->unpack();
         vec.insert(vec.end(), v.begin(), v.end());
     }
     return vec;
 }
 
-Value* NMethodCall::codeGen(CodeGenContext& context)
+static std::string typeName(Type *ty)
+{
+    std::string str;
+    while (ty->isPointerTy()) {
+        str += '*';
+        ty = ty->getPointerElementType();
+    }
+    if (ty->isStructTy()) {
+        auto st = static_cast<StructType *>(ty);
+        str += st->getName();
+    } else {
+        raw_string_ostream stream(str);
+        ty->print(stream);
+        stream.flush();
+    }
+    return str;
+}
+
+Value *NMethodCall::codeGen(CodeGenContext& context)
 {
     std::cout << "Creating method call: " << name << endl;
 
-    std::vector<Value *> values;
+    std::vector<NExpression *> argExpr;
 
     if (this->context()) {
-        auto vec = this->context()->unpack(context);
-        values.insert(values.end(), vec.begin(), vec.end());
+        auto vec = this->context()->unpack();
+        argExpr.insert(argExpr.end(), vec.begin(), vec.end());
     }
 
     for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        auto vec = (*it)->unpack(context);
-        std::cout<<typeid(**it).name()<<"\n";
-        values.insert(values.end(), vec.begin(), vec.end());
+        auto vec = (*it)->unpack();
+        argExpr.insert(argExpr.end(), vec.begin(), vec.end());
     }
 
+    std::vector<Value *> values;
+    values.reserve(argExpr.size());
     Function *function = context.module->getFunction(name.c_str());
 
     if (!function) {
@@ -265,9 +298,15 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
             std::vector<Type *> toMatch;
             toMatch.resize(iface->parameters.size());
 
-            int i = 0;
-            for (auto &&v: values) {
+            int numPars = std::min(proto->parameters.size(), argExpr.size());
+            for (int i = 0; i < numPars; ++i) {
+                auto v = argExpr[i]->codeGen(context);
+                values.push_back(v);
                 auto t = v->getType();
+                while (t->isPointerTy()) {
+                    t = t->getPointerElementType();
+                }
+
                 auto par = proto->parameters[i];
                 std::cout<<"    ";v->getType()->dump(); std::cout<<" -> "<<par.name()<<"\n";
                 for (size_t i = 0; i < iface->parameters.size(); ++i) {
@@ -275,8 +314,6 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
                         toMatch[i] = t;
                     }
                 }
-
-                ++i;
             }
 
             NImplDeclaration *implementation = nullptr;
@@ -299,6 +336,47 @@ Value* NMethodCall::codeGen(CodeGenContext& context)
 
     if (function == NULL) {
         error("no such function '{}'", name);
+    }
+
+    size_t i = 0;
+    for (auto &&arg: function->getArgumentList()) {
+        if (values.size() <= i) {
+            values.push_back(argExpr[i]->codeGen(context));
+        }
+        auto ty = values[i]->getType();
+        auto argTy = arg.getType();
+
+        auto pointerLevel = [](Type *t) {
+            int p = 0;
+            while (t->isPointerTy()) {
+                t = t->getPointerElementType();
+                ++p;
+            }
+            return p;
+        };
+
+        int argPl = pointerLevel(argTy);
+
+        while (pointerLevel(ty) > argPl) {
+            values[i] = new LoadInst(values[i], "", false, context.currentBlock()->block);
+            ty = values[i]->getType();
+        }
+
+        if (ty != argTy) {
+            err(argExpr[i]->token(), "wrong argument type to function; expected '{}', found '{}'", typeName(argTy), typeName(ty));
+        }
+        i++;
+    }
+    if (function->isVarArg()) {
+        for (; i < argExpr.size(); ++i) {
+            // varargs, we need to do a load here
+            values.push_back(argExpr[i]->load(context));
+        }
+    } else {
+        size_t numArgs = i;
+        if (numArgs < argExpr.size()) {
+            err(argExpr[numArgs]->token(), "too many arguments to function");
+        }
     }
 
     CallInst *call = CallInst::Create(function, makeArrayRef(values), "", context.currentBlock()->block);
@@ -327,15 +405,17 @@ Value *NBinaryOperator::codeGen(CodeGenContext& context)
         return -1;
     };
 
-    auto rhsValues = rhs->unpack(context);
-    auto lhsValues = lhs->unpack(context);
-    if (rhsValues.size() != lhsValues.size()) {
+    auto rhsExprs = rhs->unpack();
+    auto lhsExprs = lhs->unpack();
+    if (rhsExprs.size() != lhsExprs.size()) {
         error("both operands must have the same cardinality");
     }
-    assert(rhsValues.size() == 1);
-    for (size_t i = 0; i < rhsValues.size(); ++i) {
-        auto lhst = lhsValues[i]->getType();
-        auto rhst = rhsValues[i]->getType();
+    assert(rhsExprs.size() == 1);
+    for (size_t i = 0; i < rhsExprs.size(); ++i) {
+        auto lhsValue = lhsExprs[i]->load(context);
+        auto rhsValue = rhsExprs[i]->load(context);
+        auto lhst = lhsValue->getType();
+        auto rhst = rhsValue->getType();
         if (lhst != rhst) {
             err(token(), "mismatched types in binary operation");
         }
@@ -343,7 +423,7 @@ Value *NBinaryOperator::codeGen(CodeGenContext& context)
         if (instr == -1) {
             err(token(), "invalid operands for binary expression");
         }
-        return BinaryOperator::Create((Instruction::BinaryOps)instr, lhsValues[i], rhsValues[i], "", context.currentBlock()->block);
+        return BinaryOperator::Create((Instruction::BinaryOps)instr, lhsValue, rhsValue, "", context.currentBlock()->block);
     }
     return nullptr;
 }
