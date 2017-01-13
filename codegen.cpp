@@ -99,7 +99,9 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
         parentV->dump();
         t->dump();
 
-        t = t->getPointerElementType();
+        if (t->isPointerTy()) {
+            t = t->getPointerElementType();
+        }
         while (t->isPointerTy()) {
             parentV = new LoadInst(parentV, "", false, currentBlock()->block);
             t = parentV->getType()->getPointerElementType();
@@ -111,14 +113,21 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
             Struct &str = structs[st->getName()];
 
             int id = -1;
-            for (size_t i = 0; i < str.fields.size(); ++i) {
-                if (str.fields[i] == ident.name) {
-                    id = i;
-                    break;
+            if (ident.type == NIdentifier::Name) {
+                for (size_t i = 0; i < str.fields.size(); ++i) {
+                    if (str.fields[i] == ident.name) {
+                        id = i;
+                        break;
+                    }
                 }
-            }
-            if (id == -1) {
-                err(ident.token(), "struct '{}' has no field named '{}'", st->getName().str(), ident.name);
+                if (id == -1) {
+                    err(ident.token(), "struct '{}' has no field named '{}'", st->getName().str(), ident.name);
+                }
+            } else {
+                if (ident.index >= (int)str.fields.size()) {
+                    err(ident.token(), "invalid index '{}' when accessing struct with {} elements", ident.index, str.fields.size());
+                }
+                id = ident.index;
             }
 
             auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
@@ -138,6 +147,8 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
             auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, ident.index, false));
 
             return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
+        } else {
+            err(ident.token(), "no such field in value");
         }
     }
 

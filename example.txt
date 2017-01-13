@@ -99,6 +99,8 @@ func main(): i32 {
     let s = "printf 1: '%s' 2: '%f' 3: '%f'\n";
 
     printf(s, "blab", fm, tuple.2.0 * 4.2);
+
+    print(bla.0);
 //     puts("llll");
 //
 //     print(3.3);
