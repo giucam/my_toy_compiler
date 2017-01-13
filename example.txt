@@ -101,6 +101,7 @@ func main(): i32 {
     printf(s, "blab", fm, tuple.2.0 * 4.2);
 
     print(bla.0);
+    (2,5).0.print();
 //     puts("llll");
 //
 //     print(3.3);

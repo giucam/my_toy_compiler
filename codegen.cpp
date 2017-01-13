@@ -99,7 +99,8 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
         parentV->dump();
         t->dump();
 
-        if (t->isPointerTy()) {
+        bool isLiteral = !t->isPointerTy();
+        if (!isLiteral) {
             t = t->getPointerElementType();
         }
         while (t->isPointerTy()) {
@@ -143,10 +144,15 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
             if (ident.index < 0 || ident.index >= (int)st->elements().size()) {
                 err(ident.token(), "invalid index '{}' when accessing tuple with {} elements", ident.index, st->elements().size());
             }
-            auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
-            auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, ident.index, false));
 
-            return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
+            if (isLiteral) {
+                return ExtractValueInst::Create(parentV, { (unsigned int)ident.index }, "", currentBlock()->block);
+            } else {
+                auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
+                auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, ident.index, false));
+
+                return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
+            }
         } else {
             err(ident.token(), "no such field in value");
         }
