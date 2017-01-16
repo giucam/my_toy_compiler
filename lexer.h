@@ -22,6 +22,8 @@ public:
         Identifier,
         Numeric,
         Return,
+        If,
+        Else,
         LeftParens,
         RightParens,
         LeftBrace,
@@ -40,7 +42,10 @@ public:
         Ellipsis,
         CompareEqual,
         StringLiteral,
+        CharLiteral,
         Ampersand,
+        LeftAngleBracket,
+        RightAngleBracket,
     };
     Token() : m_lineno(0), m_columnno(0) {}
     Token(Type t, int l, int c, const std::string &filename, const std::string &txt, const std::string &line): m_type(t), m_lineno(l), m_columnno(c), m_filename(filename), m_line(line), m_text(txt) {}
@@ -77,6 +82,8 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOK(Identifier)
         TOK(Numeric)
         TOKSTR(Return, "'return'")
+        TOKSTR(If, "'if'")
+        TOKSTR(Else, "'else'")
         TOKSTR(LeftParens, "'('")
         TOKSTR(RightParens, "')'")
         TOKSTR(LeftBrace, "'{'")
@@ -95,7 +102,10 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(Ellipsis, "'...'")
         TOKSTR(CompareEqual, "'=='")
         TOK(StringLiteral)
+        TOK(CharLiteral)
         TOKSTR(Ampersand, "'&'")
+        TOKSTR(LeftAngleBracket, "'<'")
+        TOKSTR(RightAngleBracket, "'>'")
     }
 #undef TOK
     return s;

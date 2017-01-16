@@ -31,10 +31,11 @@ private:
     void parseLet();
     void parseStruct();
     void parseIface();
-    NIfaceParameterList parseParameterList();
+    std::vector<TypeName> parseParameterList();
     void parseImpl();
     void parseExpressionStatement();
     TypeName parseType();
+    void parseIf();
 
     std::string m_filename;
     Lexer m_lexer;

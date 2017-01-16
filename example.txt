@@ -1,5 +1,9 @@
-extern puts(val: string): i32
-extern printf(format: string, ...): i32
+func extern puts(val: string): i32;
+func extern printf(format: string, ...): i32;
+func extern fwrite(ptr: *i8, size: u32, nmemb: u32, stream: *i8): u32;
+func extern strchr(str: *i8, c: i32): *i8;
+func extern strlen(str: *i8): u32;
+let extern stdout: *i8;
 
 iface math(A, B) {
     func do_math(A, B);
@@ -20,18 +24,18 @@ impl math(f64, f64) {
 }
 
 iface printable(A) {
-    func print(A);
+    func printValue(A);
 }
 
 impl printable(i32) {
-    func print(value: i32): void {
-        printf("%d\n", value);
+    func printValue(value: i32): void {
+        printf("%d", value);
     }
 }
 
 impl printable(f64) {
-    func print(value: f64): void {
-        printf("%f\n", value);
+    func printValue(value: f64): void {
+        printf("%f", value);
     }
 }
 
@@ -54,14 +58,31 @@ struct foo {
 }
 
 impl printable(foo) {
-    func print(value: *foo): void {
-        printf("foo: ddd: %d, pupu: %d, s1.f: %d\n", value.ddd, value.pupu, value.s1.f);
+    func printValue(value: *foo): void {
+        printf("foo: { ddd: %d, pupu: %d, s1.f: %d }", value.ddd, value.pupu, value.s1.f);
     }
 }
 
 impl printable(S1) {
-    func print(value: S1): void {
-        printf("S1: %d\n", value.f);
+    func printValue(value: S1): void {
+        printf("S1: %d", value.f);
+    }
+}
+
+impl printable(string) {
+    func printValue(val: string): void {
+        fwrite(val, 1, strlen(val), stdout);
+    }
+}
+
+impl printable(i8) {
+    func printValue(val: i8): void {
+        printf("%d", val);
+    }
+}
+
+impl printable(()) {
+    func printValue(): void {
     }
 }
 
@@ -72,8 +93,31 @@ func onfoo(a: *foo): *foo
     return a;
 }
 
+func print(format: string, values: (...)): void
+{
+    let ptr = strchr(format, '{');
+    if (ptr) {
+        let len = ptr - format;
+
+        fwrite(format, 1, len, stdout);
+
+        let (arg, rest) = values;
+        printValue(arg);
+
+        len = strlen(ptr);
+        if (len < 3) {
+            return;
+        }
+        ptr = ptr + 2;
+
+        print(ptr, rest);
+    } else {
+        fwrite(format, 1, strlen(format), stdout);
+    }
+}
+
 func main(): i32 {
-//     let gg = 6;
+    let gg = 6;
     let sss: S1 = { f = 3 };
     let bla: foo = { ddd = 3, pupu = 9, s1 = &sss };
 //     let bla2: foo = { ddd = 3, pupu = 9, s1 = &sss };
@@ -84,36 +128,56 @@ func main(): i32 {
 //
 //     print(5.4);
 //
-    let tuple = ( 3, "rew", (4.5, 2) );
-    print(tuple.2.1 *3+3);
+   let tuple = ( "ooi{}\n", 4 );
+//     print(tuple.2.1 *3+3);
 //
-// //     let (t1, t2) = (3, 9);
-//
-    let m = do_math(bla.ddd, bla.s1.f);
+//     let (t1, tup) = (3,4);
+
+//     print(t1);
+//     print(tup.1.0);
+
+// let tup = (2,3);
+// bar((2,3));
+// print(3);
+// printf("%f\n",4.3);
+// tuple.bar();
+
+// let dd = tuple.count()<1;
+// dd.print();
+
+tuple.print();
+// printValues(4,5,gg,sss);
+
+print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", 3, 4, bla);
+
+// bar(tuple);
+
 // //
-    let fm = do_math(3.4, 1.2);
-// // // //let m = do_math(a = 4, b = 5)
-// // //     //echo(toPrint = m)
-// // //     //printi(val=3)
+//     let m = do_math(bla.ddd, bla.s1.f);
 // // //
-    let s = "printf 1: '%s' 2: '%f' 3: '%f'\n";
-
-    printf(s, "blab", fm, tuple.2.0 * 4.2);
-
-    print(bla.0);
-    (2,5).0.print();
-//     puts("llll");
+//     let fm = do_math(3.4, 1.2);
+// // // // //let m = do_math(a = 4, b = 5)
+// // // //     //echo(toPrint = m)
+// // // //     //printi(val=3)
+// // // //
+//     let s = "printf 1: '%s' 2: '%f' 3: '%f'\n";
 //
-//     print(3.3);
-//     3.3.print();
-//     do_math(3, 1).print();
-//     3.do_math(1).print();
-//     (3, 1).do_math().print();
-
-//     onfoo(&bla);
-    bla.print();
-    bla.onfoo().print();
-    print(bla);
+//     printf(s, "blab", fm, tuple.2.0 * 4.2);
+//
+//     print(bla.0);
+// //     (2,5,6,7).(2,0).do_math().print();
+// //     puts("llll");
+// //
+// //     print(3.3);
+// //     3.3.print();
+// //     do_math(3, 1).print();
+// //     3.do_math(1).print();
+// //     (3, 1).do_math().print();
+//
+// //     onfoo(&bla);
+//     bla.print();
+//     bla.onfoo().print();
+//     print(bla);
 //     print(bla.ddd);
 
 //     printf("ll %d\n",bla.ddd);

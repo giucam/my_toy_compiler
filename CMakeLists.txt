@@ -15,6 +15,7 @@ add_definitions(${LLVM_DEFINITIONS})
 set(SOURCES
     main.cpp
     codegen.cpp
+    operators.cpp
     lexer.cpp
     parser.cpp
     fmt/format.cc

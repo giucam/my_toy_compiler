@@ -6,17 +6,6 @@
 #include "common.h"
 #include "node.h"
 
-inline std::string cursorLine(int col)
-{
-    return std::string(std::max(col - 1, 0), ' ') + '^';
-}
-
-template<class... Args>
-void err(const Token &tok, Args &&... args)
-{
-    Err(tok.filename(), tok.lineNo(), tok.columnNo()).line(std::forward<Args>(args)...).line("{}", tok.line()).line(cursorLine(tok.columnNo()));
-}
-
 Parser::Parser(const std::string &filename)
       : m_filename(filename)
       , m_lexer(filename)
@@ -44,6 +33,9 @@ static int opPrecedence(Token::Type t)
         case Token::Type::Div: return 40;
         case Token::Type::Plus: return 20;
         case Token::Type::Minus: return 20;
+        case Token::Type::LeftAngleBracket: return 10;
+        case Token::Type::RightAngleBracket: return 10;
+        case Token::Type::CompareEqual: return 5;
         default:
             break;
     }
@@ -65,6 +57,10 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
             switch (opTok.type()) {
                 case Token::Type::Star: return NBinaryOperator::OP::Mul;
                 case Token::Type::Plus: return NBinaryOperator::OP::Add;
+                case Token::Type::Minus: return NBinaryOperator::OP::Sub;
+                case Token::Type::LeftAngleBracket: return NBinaryOperator::OP::Lesser;
+                case Token::Type::RightAngleBracket: return NBinaryOperator::OP::Greater;
+                case Token::Type::CompareEqual: return NBinaryOperator::OP::Equal;
                 default:
                     abort();
             }
@@ -141,6 +137,14 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
         nextToken();
         checkTokenType(m_lexer.peekToken(), Token::Type::Identifier);
         return std::make_unique<NAddressOfExpression>(tok, parseExpression());
+    } else if (tok.type() == Token::Type::CharLiteral) {
+        nextToken();
+        if (tok.text().size() < 1) {
+            err(tok, "empty char literal");
+        } else if (tok.text().size() > 1) {
+            err(tok, "multibyte char literal");
+        }
+        return std::make_unique<NInteger>(tok, tok.text().data()[0]);
     }
     return nullptr;
 }
@@ -168,7 +172,11 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
                 expr = std::make_unique<NAssignment>(std::move(expr), std::move(rhs));
                 break;
             }
+            case Token::Type::LeftAngleBracket:
+            case Token::Type::RightAngleBracket:
+            case Token::Type::CompareEqual:
             case Token::Type::Star:
+            case Token::Type::Minus:
             case Token::Type::Plus: {
                 expr = parseBinOp(std::move(expr), 0);
                 break;
@@ -188,26 +196,67 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
 void Parser::parseReturn()
 {
     checkTokenType(nextToken(), Token::Type::Return);
-    auto statement = new NReturnStatement(std::move(parseExpression()));
-
-    checkTokenType(nextToken(), Token::Type::Semicolon);
-    m_block->statements.push_back(statement);
+    NReturnStatement *stmt = nullptr;
+    if (m_lexer.peekToken().type() == Token::Type::Semicolon) {
+        nextToken();
+        stmt = new NReturnStatement(nullptr);
+    } else {
+        stmt = new NReturnStatement(std::move(parseExpression()));
+        checkTokenType(nextToken(), Token::Type::Semicolon);
+    }
+    m_block->statements.push_back(stmt);
 }
 
 void Parser::parseLet()
 {
-    checkTokenType(nextToken(), Token::Type::Let);
+    auto letTok = nextToken(Token::Type::Let);
 
-    auto nameTok = nextToken(Token::Type::Identifier);
+    if (m_lexer.peekToken().type() == Token::Type::Extern) {
+        nextToken();
+        auto name = nextToken(Token::Type::Identifier);
+        nextToken(Token::Type::Colon);
+        auto type = parseType();
+        nextToken(Token::Type::Semicolon);
 
-    NVariableDeclaration *var = nullptr;
+        auto var = new NExternVariableDeclaration(letTok, name.text(), type);
+        m_block->statements.push_back(var);
+        return;
+    }
+
+    std::vector<NVariableName> nameToks;
+    bool isMulti = false;
+    if (m_lexer.peekToken().type() == Token::Type::LeftParens) {
+        isMulti = true;
+        nextToken();
+        while (m_lexer.peekToken().type() != Token::Type::RightParens) {
+            auto tok = nextToken(Token::Type::Identifier);
+            nameToks.emplace_back(tok, tok.text());
+
+            if (m_lexer.peekToken().type() == Token::Type::Comma) {
+                nextToken();
+            }
+        }
+        nextToken();
+    } else {
+        auto tok = nextToken(Token::Type::Identifier);
+        nameToks.emplace_back(tok, tok.text());
+    }
+
+//     auto nameTok = nextToken(Token::Type::Identifier);
+    auto &&varName = nameToks.front();
+
+    NStatement *var = nullptr;
 
     auto tok = nextToken();
     if (tok.type() == Token::Type::Equal) {
         auto expr = parseExpression();
 
-        auto id = std::make_unique<NIdentifier>(nameTok, nameTok.text());
-        var = new NVariableDeclaration(nameTok, nameTok.text(), new NAssignment(std::move(id), std::move(expr)));
+        if (!isMulti) {
+            auto id = std::make_unique<NIdentifier>(varName.token(), varName.name());
+            var = new NVariableDeclaration(letTok, varName, new NAssignment(std::move(id), std::move(expr)));
+        } else {
+            var = new NMultiVariableDeclaration(letTok, nameToks, std::move(expr));
+        }
     } else if (tok.type() == Token::Type::Colon) {
         auto type = parseType();
         checkTokenType(nextToken(), Token::Type::Equal);
@@ -232,12 +281,12 @@ void Parser::parseLet()
                 }
             }
 
-            var = new NVariableDeclaration(nameTok, nameTok.text(), type, list);
+            var = new NVariableDeclaration(letTok, varName, type, list);
         } else {
             auto expr = parseExpression();
 
-            auto id = std::make_unique<NIdentifier>(nameTok, nameTok.text());
-            var = new NVariableDeclaration(nameTok, nameTok.text(), type, new NAssignment(std::move(id), std::move(expr)));
+            auto id = std::make_unique<NIdentifier>(varName.token(), varName.name());
+            var = new NVariableDeclaration(letTok, varName, type, new NAssignment(std::move(id), std::move(expr)));
         }
     } else {
         err(tok, "':' or '=' expected");
@@ -266,7 +315,7 @@ void Parser::parseStruct()
         auto type = parseType();
         checkTokenType(nextToken(), Token::Type::Semicolon);
 
-        list.push_back(NVariableDeclaration(tok, tok.text(), type));
+        list.push_back(NVariableDeclaration(tok, NVariableName(tok, tok.text()), type));
 
         tok = nextToken();
     }
@@ -275,22 +324,25 @@ void Parser::parseStruct()
     m_block->statements.push_back(decl);
 }
 
-NIfaceParameterList Parser::parseParameterList()
+std::vector<TypeName> Parser::parseParameterList()
 {
     checkTokenType(nextToken(), Token::Type::LeftParens);
 
-    NIfaceParameterList list;
-    auto tok = nextToken();
-    while (tok.type() != Token::Type::RightParens) {
-        checkTokenType(tok, Token::Type::Identifier);
+    std::vector<TypeName> list;
+    while (m_lexer.peekToken().type() != Token::Type::RightParens) {
+//     auto tok = nextToken();
+//     while (tok.type() != Token::Type::RightParens) {
+        list.push_back(parseType());
+//         checkTokenType(tok, Token::Type::Identifier);
 
-        list.emplace_back(tok, tok.text());
+//         list.emplace_back(tok, tok.text());
 
-        tok = nextToken();
-        if (tok.type() == Token::Type::Comma) {
-            tok = nextToken();
+//         tok = nextToken();
+        if (m_lexer.peekToken().type() == Token::Type::Comma) {
+            nextToken();
         }
     }
+    nextToken();
 
     return list;
 }
@@ -353,6 +405,26 @@ void Parser::parseExpressionStatement()
     checkTokenType(nextToken(), Token::Type::Semicolon);
 }
 
+void Parser::parseIf()
+{
+    nextToken(Token::Type::If);
+
+    nextToken(Token::Type::LeftParens);
+    auto expr = parseExpression();
+    nextToken(Token::Type::RightParens);
+
+    auto block = parseBlock();
+    NBlock *elseBlock = nullptr;
+
+    if (m_lexer.peekToken().type() == Token::Type::Else) {
+        nextToken();
+        elseBlock = parseBlock();
+    }
+
+    auto stmt = new NIfStatement(std::move(expr), block, elseBlock);
+    m_block->statements.push_back(stmt);
+}
+
 void Parser::parseStatements()
 {
     fmt::print("block\n");
@@ -365,11 +437,12 @@ void Parser::parseStatements()
         case Token::Type::EOF:
             eof = true;
             break;
-        case Token::Type::Extern:
-            parseExtern();
-            break;
         case Token::Type::Func:
-            m_block->statements.push_back(parseFunc());
+            if (m_lexer.peekToken(2).type() == Token::Type::Extern) {
+                parseExtern();
+            } else {
+                m_block->statements.push_back(parseFunc());
+            }
             break;
         case Token::Type::Return:
             parseReturn();
@@ -385,6 +458,9 @@ void Parser::parseStatements()
             break;
         case Token::Type::Impl:
             parseImpl();
+            break;
+        case Token::Type::If:
+            parseIf();
             break;
         case Token::Type::RightBrace:
             fmt::print("br\n");
@@ -426,6 +502,7 @@ NBlock *Parser::parseBlock()
 void Parser::parseExtern()
 {
     fmt::print("extern\n");
+    nextToken(Token::Type::Func);
     checkTokenType(nextToken(), Token::Type::Extern);
 
     auto nameTok = nextToken(Token::Type::Identifier);
@@ -457,6 +534,7 @@ void Parser::parseExtern()
     checkTokenType(nextToken(), Token::Type::Colon);
 
     auto decl = new NExternDeclaration(nameTok.text(), parseType(), list, varargs);
+    nextToken(Token::Type::Semicolon);
     m_block->statements.push_back(decl);
 }
 
@@ -464,6 +542,24 @@ TypeName Parser::parseType()
 {
     int pointer = 0;
     auto typeTok = nextToken();
+    if (typeTok.type() == Token::Type::LeftParens) {
+        std::vector<Token> types;
+        std::string type = "(";
+        while (m_lexer.peekToken().type() != Token::Type::RightParens) {
+            auto tok = nextToken();
+            types.push_back(tok);
+            type += tok.type() == Token::Type::Ellipsis ? "..." : tok.text();
+
+            if (m_lexer.peekToken().type() == Token::Type::Comma) {
+                type += ", ";
+                nextToken();
+            }
+        }
+        type += ")";
+        nextToken();
+
+        return TypeName(typeTok, type, 0);
+    }
     while (typeTok.type() == Token::Type::Star) {
         typeTok = nextToken();
         pointer++;

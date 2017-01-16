@@ -83,6 +83,10 @@ Token Lexer::token(const std::string &str) const
         return token(Token::Type::Return);
     } else if (str == "let") {
         return token(Token::Type::Let);
+    } else if (str == "if") {
+        return token(Token::Type::If);
+    } else if (str == "else") {
+        return token(Token::Type::Else);
     }
 
     return token(Token::Type::Identifier);
@@ -157,6 +161,19 @@ Token Lexer::readNextToken()
             }
             m_text = str;
             return token(Token::Type::StringLiteral);
+        } else if (m_lastChar == '\'') {
+            std::string str;
+            while (!m_stream.eof()) {
+                nextChar();
+                if (m_lastChar == '\'') {
+                    nextChar();
+                    break;
+                } else {
+                    str += m_lastChar;
+                }
+            }
+            m_text = str;
+            return token(Token::Type::CharLiteral);
         } else if (m_lastChar == '.') {
             if (nextChar() != '.') {
                 return token(Token::Type::Dot);
@@ -220,6 +237,12 @@ Token Lexer::readNextToken()
         } else if (m_lastChar == '&') {
             nextChar();
             return token(Token::Type::Ampersand);
+        } else if (m_lastChar == '<') {
+            nextChar();
+            return token(Token::Type::LeftAngleBracket);
+        } else if (m_lastChar == '>') {
+            nextChar();
+            return token(Token::Type::RightAngleBracket);
         } else {
             break;
         }

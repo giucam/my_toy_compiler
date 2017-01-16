@@ -24,12 +24,16 @@ class NBlock;
 class NIdentifier;
 class NIfaceDeclaration;
 class NIfacePrototype;
+class NFunctionDeclaration;
 
 class CodeGenBlock {
 public:
     BasicBlock *block;
+    Function *function;
     Value *returnValue;
+    CodeGenBlock *parent;
     std::map<std::string, Value*> locals;
+    bool returned;
 };
 
 struct Struct {
@@ -39,6 +43,8 @@ struct Struct {
 
 struct FunctionData {
     std::vector<std::string> argumentNames;
+    bool hasTupleArg;
+    CodeGenBlock *block;
 };
 
 struct Tuple {
@@ -51,12 +57,15 @@ class CodeGenContext {
 
 public:
     std::unordered_map<std::string, Struct> structs;
+    std::unordered_map<std::string, StructType *> tupleTypes;
     std::unordered_map<Type *, Struct *> structsByType;
     std::unordered_map<Type *, Tuple> tuples;
     std::unordered_map<Function *, FunctionData> functions;
 
     std::unordered_map<std::string, NIfacePrototype *> ifacePrototypes;
     std::unordered_map<std::string, NIfaceDeclaration *> interfaces;
+    std::unordered_map<std::string, NFunctionDeclaration *> functionTemplates;
+    std::unordered_map<std::string, Function *> concreteTemplates;
 
     Module *module;
     LLVMContext TheContext;
@@ -69,8 +78,8 @@ public:
     GenericValue runCode();
     std::map<std::string, Value*>& locals() { return blocks.top()->locals; }
     CodeGenBlock *currentBlock() { return blocks.top(); }
-    void pushBlock(BasicBlock *block) { blocks.push(new CodeGenBlock()); blocks.top()->returnValue = NULL; blocks.top()->block = block; }
-    void popBlock() { CodeGenBlock *top = blocks.top(); blocks.pop(); delete top; }
+    void pushBlock(BasicBlock *block, Function *function, CodeGenBlock *parent) { blocks.push(new CodeGenBlock{block, function, nullptr, parent, {}, false }); }
+    void popBlock() { CodeGenBlock *top = blocks.top(); blocks.pop(); }
     void setCurrentReturnValue(Value *value) { blocks.top()->returnValue = value; }
     Value* getCurrentReturnValue() { return blocks.top()->returnValue; }
 };
