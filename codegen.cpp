@@ -7,40 +7,44 @@
 // #include "parser.hpp"
 #include "common.h"
 
-using namespace std;
+using namespace llvm;
+
+CodeGenContext::CodeGenContext()
+              : m_module(std::make_unique<llvm::Module>("main", m_context))
+{
+}
 
 /* Compile the AST into a module */
-void CodeGenContext::generateCode(NBlock& root)
+void CodeGenContext::generateCode(NBlock &root)
 {
-	std::cout << "Generating code...\n";
-	
-	/* Create the top level interpreter function to call as entry */
-	vector<Type*> argTypes;
-	BasicBlock *bblock = BasicBlock::Create(TheContext, "entry", 0, 0);
-	
-	/* Push a new variable/block context */
-	pushBlock(bblock, nullptr, nullptr);
-	root.codeGen(*this); /* emit bytecode for the toplevel block */
-	ReturnInst::Create(TheContext, bblock);
-	popBlock();
+    std::cout << "Generating code...\n";
 
-        mainFunction = module->getFunction("main");
-	
-	/* Print the bytecode in a human-readable format 
-	   to see if our program compiled properly
-	 */
-	std::cout << "Code is generated.\n";
-	PassManager<Module> pm;
-        AnalysisManager<Module>* am = new AnalysisManager<Module>;
-	pm.addPass(PrintModulePass(outs()));
-	pm.run(*module, *am);
+    /* Create the top level interpreter function to call as entry */
+    BasicBlock *bblock = BasicBlock::Create(context(), "entry", 0, 0);
+
+    /* Push a new variable/block context */
+    pushBlock(bblock, nullptr, nullptr);
+    root.codeGen(*this); /* emit bytecode for the toplevel block */
+    ReturnInst::Create(m_context, bblock);
+    popBlock();
+
+    m_mainFunction = m_module->getFunction("main");
+
+    /* Print the bytecode in a human-readable format
+        to see if our program compiled properly
+        */
+    std::cout << "Code is generated.\n";
+    PassManager<Module> pm;
+    AnalysisManager<Module>* am = new AnalysisManager<Module>;
+    pm.addPass(PrintModulePass(outs()));
+    pm.run(*m_module, *am);
 }
 
 void CodeGenContext::writeOutput(const std::string &filename)
 {
     std::ofstream out(filename);
     raw_os_ostream stream(out);
-    module->print(stream, nullptr);
+    m_module->print(stream, nullptr);
 }
 
 static std::string typeName(Type *ty)
@@ -61,22 +65,27 @@ static std::string typeName(Type *ty)
     return str;
 }
 
-StructType *tupleType(const std::vector<Type *> &argTypes, CodeGenContext &context)
+bool CodeGenContext::isFunctionNameAvailable(const std::string &name) const
+{
+    return !module().getFunction(name.c_str()) && (m_functionTemplates.find(name) == m_functionTemplates.end());
+}
+
+StructType *CodeGenContext::tupleType(const std::vector<Type *> &argTypes)
 {
     std::string id("tupletype");
     for (auto &&type: argTypes) {
         id += "_" + typeName(type);
     }
-    if (auto type = context.tupleTypes[id]) {
+    if (auto type = m_tupleTypes[id]) {
         return type;
     }
 
-    StructType *type = StructType::create(context.TheContext, argTypes, id);
-    context.tupleTypes[id] = type;
+    StructType *type = StructType::create(context(), argTypes, id);
+    m_tupleTypes[id] = type;
     return type;
 }
 
-Value *makeTupleValue(const std::vector<Value *> &values, const std::string &name, CodeGenContext &context)
+Value *CodeGenContext::makeTupleValue(const std::vector<Value *> &values, const std::string &name)
 {
     std::vector<Type *> argTypes;
     argTypes.reserve(values.size());
@@ -85,63 +94,52 @@ Value *makeTupleValue(const std::vector<Value *> &values, const std::string &nam
         argTypes.push_back(t);
     }
 
-    StructType *type = tupleType(argTypes, context);
-    Tuple &tuple = context.tuples[type];
+    StructType *type = tupleType(argTypes);
+    TupleInfo &tuple = m_tupleInfo[type];
     tuple.type = type;
 
     if (argTypes.empty()) {
         return ConstantStruct::get(type, {});
     }
 
-    AllocaInst *alloc = new AllocaInst(type, name.c_str(), context.currentBlock()->block);
+    AllocaInst *alloc = new AllocaInst(type, name.c_str(), currentBlock()->block);
 
     int id = 0;
     for (auto &&v: values) {
-        auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
-        auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id++, false));
+        auto id1 = ConstantInt::get(context(), llvm::APInt(32, 0, false));
+        auto id2 = ConstantInt::get(context(), llvm::APInt(32, id++, false));
 
-        auto value = GetElementPtrInst::CreateInBounds(alloc, {id1, id2}, "", context.currentBlock()->block);
-        new StoreInst(v, value, false, context.currentBlock()->block);
+        auto value = GetElementPtrInst::CreateInBounds(alloc, {id1, id2}, "", currentBlock()->block);
+        new StoreInst(v, value, false, currentBlock()->block);
     }
 
 //     return new LoadInst(alloc, "", false, context.currentBlock()->block);
     return alloc;
 }
 
-/* Executes the AST by running the main function */
-GenericValue CodeGenContext::runCode() {
-	std::cout << "Running code...\n";
-	ExecutionEngine *ee = EngineBuilder( unique_ptr<Module>(module) ).create();
-	ee->finalizeObject();
-	vector<GenericValue> noargs;
-	GenericValue v = ee->runFunction(mainFunction, noargs);
-	std::cout << "Code was run.\n";
-	return v;
-}
-
 /* Returns an LLVM type based on the identifier */
-static Type *typeOf(const TypeName &type, CodeGenContext& context)
+llvm::Type *CodeGenContext::typeOf(const TypeName &type)
 {
     Type *basicType = [&]() -> Type * {
         if (type.name().compare("i32") == 0) {
-            return Type::getInt32Ty(context.TheContext);
+            return Type::getInt32Ty(context());
         } else if (type.name() == "i8") {
-            return Type::getInt8Ty(context.TheContext);
+            return Type::getInt8Ty(context());
         } else if (type.name() == "u32") {
-            return Type::getInt32Ty(context.TheContext);
+            return Type::getInt32Ty(context());
         } else if (type.name().compare("f64") == 0) {
-            return Type::getDoubleTy(context.TheContext);
+            return Type::getDoubleTy(context());
         } else if (type.name().compare("void") == 0) {
-            return Type::getVoidTy(context.TheContext);
+            return Type::getVoidTy(context());
         } else if (type.name().compare("string") == 0) {
-            return Type::getInt8PtrTy(context.TheContext);
-        } else if (context.structs.find(type.name()) != context.structs.end()) {
-            return context.structs[type.name()].type;
+            return Type::getInt8PtrTy(context());
+        } else if (m_structInfo.find(type.name()) != m_structInfo.end()) {
+            return m_structInfo[type.name()].type;
         } else if (type.name()[0] == '(') {
             auto name = type.name();
             std::vector<Type *> types;
-            int start = 1;
-            int end = 1;
+            size_t start = 1;
+            size_t end = 1;
             while (start < name.size()) {
                 end = name.find(',', end);
                 if (end == std::string::npos) {
@@ -151,9 +149,9 @@ static Type *typeOf(const TypeName &type, CodeGenContext& context)
                         end = name.size() - 2;
                     }
                 }
-                types.push_back(typeOf(TypeName(type.token(), name.substr(start, end)), context));
+                types.push_back(typeOf(TypeName(type.token(), name.substr(start, end))));
             }
-            return tupleType(types, context);
+            return tupleType(types);
         }
         err(type.token(), "type '{}' was not declared in this scope", type.name());
         return nullptr; //silence the warning
@@ -163,6 +161,39 @@ static Type *typeOf(const TypeName &type, CodeGenContext& context)
         basicType = basicType->getPointerTo();
     }
     return basicType;
+}
+
+const StructInfo *CodeGenContext::structInfo(llvm::Type *type) const
+{
+    if (!type->isStructTy()) {
+        return nullptr;
+    }
+
+    auto it = m_structInfoByType.find(type);
+    if (it != m_structInfoByType.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+StructInfo *CodeGenContext::newStructType(llvm::StructType *type)
+{
+    auto info = &m_structInfo[type->getName()];
+    m_structInfoByType[type] = info;
+    return info;
+}
+
+const TupleInfo *CodeGenContext::tupleInfo(llvm::Type *type) const
+{
+    if (!type->isStructTy()) {
+        return nullptr;
+    }
+
+    auto it = m_tupleInfo.find(type);
+    if (it != m_tupleInfo.end()) {
+        return &it->second;
+    }
+    return nullptr;
 }
 
 Value *CodeGenContext::findValue(const NIdentifier &ident)
@@ -187,14 +218,13 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
         }
 
         t->dump();
-        if (structsByType.find(t) != structsByType.end()) {
+        if (auto info = structInfo(t)) {
             StructType *st = static_cast<StructType *>(t);
-            Struct &str = structs[st->getName()];
 
             int id = -1;
             if (ident.type == NIdentifier::Name) {
-                for (size_t i = 0; i < str.fields.size(); ++i) {
-                    if (str.fields[i] == ident.name) {
+                for (size_t i = 0; i < info->fields.size(); ++i) {
+                    if (info->fields[i] == ident.name) {
                         id = i;
                         break;
                     }
@@ -203,17 +233,17 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
                     err(ident.token(), "struct '{}' has no field named '{}'", st->getName().str(), ident.name);
                 }
             } else {
-                if (ident.index >= (int)str.fields.size()) {
-                    err(ident.token(), "invalid index '{}' when accessing struct with {} elements", ident.index, str.fields.size());
+                if (ident.index >= (int)info->fields.size()) {
+                    err(ident.token(), "invalid index '{}' when accessing struct with {} elements", ident.index, info->fields.size());
                 }
                 id = ident.index;
             }
 
-            auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
-            auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, id, false));
+            auto id1 = ConstantInt::get(context(), llvm::APInt(32, 0, false));
+            auto id2 = ConstantInt::get(context(), llvm::APInt(32, id, false));
 
             return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
-        } else if (tuples.find(t) != tuples.end()) {
+        } else if (tupleInfo(t)) {
             if (ident.type != NIdentifier::Index) {
                 err(ident.token(), "tuple elements can only be accessed by index");
                 exit(1);
@@ -226,8 +256,8 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
             if (isLiteral) {
                 return ExtractValueInst::Create(parentV, { (unsigned int)ident.index }, "", currentBlock()->block);
             } else {
-                auto id1 = ConstantInt::get(TheContext, llvm::APInt(32, 0, false));
-                auto id2 = ConstantInt::get(TheContext, llvm::APInt(32, ident.index, false));
+                auto id1 = ConstantInt::get(context(), llvm::APInt(32, 0, false));
+                auto id2 = ConstantInt::get(context(), llvm::APInt(32, ident.index, false));
 
                 return GetElementPtrInst::CreateInBounds(parentV, {id1, id2}, "", currentBlock()->block);
             }
@@ -253,7 +283,7 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
         block = block->parent;
     } while (block);
 
-    if (auto global = module->getGlobalVariable(ident.name)) {
+    if (auto global = m_module->getGlobalVariable(ident.name)) {
         return global;
     }
 
@@ -261,18 +291,82 @@ Value *CodeGenContext::findValue(const NIdentifier &ident)
     return nullptr;
 }
 
+NIfacePrototype *CodeGenContext::ifacePrototype(const std::string &name) const
+{
+    auto it = m_ifacePrototypes.find(name);
+    if (it != m_ifacePrototypes.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+NIfaceDeclaration *CodeGenContext::interface(const std::string &name) const
+{
+    auto it = m_interfaces.find(name);
+    if (it == m_interfaces.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
+void CodeGenContext::addInterface(NIfaceDeclaration *iface)
+{
+    m_interfaces[iface->name] = iface;
+    for (auto &&proto: iface->prototypes) {
+        m_ifacePrototypes[proto->name] = proto;
+    }
+}
+
+llvm::Function *CodeGenContext::functionTemplate(const std::string &name, std::vector<llvm::Value *> &values)
+{
+    auto it = m_functionTemplates.find(name);
+    if (it != m_functionTemplates.end()) {
+        return makeConcreteFunction(it->second, values);
+    }
+    return nullptr;
+}
+
+void CodeGenContext::addFunctionTemplate(NFunctionDeclaration *func)
+{
+    m_functionTemplates[func->id] = func;
+}
+
+void CodeGenContext::storeLocal(const std::string &name, llvm::Value *value)
+{
+    currentBlock()->locals[name] = value;
+}
+
+llvm::Value *CodeGenContext::local(const std::string &name) const
+{
+    auto it = currentBlock()->locals.find(name);
+    if (it != currentBlock()->locals.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+void CodeGenContext::pushBlock(llvm::BasicBlock *block, llvm::Function *function, CodeGenBlock *parent)
+{
+    m_blocks.push({block, function, parent, {}, false });
+}
+
+void CodeGenContext::popBlock()
+{
+    m_blocks.pop();
+}
+
 /* -- Code Generation -- */
 
 Value* NInteger::codeGen(CodeGenContext& context)
 {
-	std::cout << "Creating integer: " << value << endl;
-	return ConstantInt::get(Type::getInt32Ty(context.TheContext), value, true);
+	std::cout << "Creating integer: " << value << '\n';
+	return ConstantInt::get(Type::getInt32Ty(context.context()), value, true);
 }
 
 Value* NDouble::codeGen(CodeGenContext& context)
 {
-	std::cout << "Creating double: " << value << endl;
-	return ConstantFP::get(Type::getDoubleTy(context.TheContext), value);
+	std::cout << "Creating double: " << value << '\n';
+	return ConstantFP::get(Type::getDoubleTy(context.context()), value);
 }
 
 Value* NString::codeGen(CodeGenContext& context)
@@ -289,11 +383,11 @@ Value* NString::codeGen(CodeGenContext& context)
         }
     }
     std::cout << ")\n";
-    auto constant = ConstantDataArray::getString(context.TheContext, value);
-    auto var = new GlobalVariable(*context.module, ArrayType::get(Type::getInt8Ty(context.TheContext), value.length() + 1), true, llvm::GlobalValue::PrivateLinkage, constant, ".str");
+    auto constant = ConstantDataArray::getString(context.context(), value);
+    auto var = new GlobalVariable(context.module(), ArrayType::get(Type::getInt8Ty(context.context()), value.length() + 1), true, llvm::GlobalValue::PrivateLinkage, constant, ".str");
 
-    auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
-    auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
+    auto id1 = ConstantInt::get(context.context(), llvm::APInt(32, 0, false));
+    auto id2 = ConstantInt::get(context.context(), llvm::APInt(32, 0, false));
 
     return GetElementPtrInst::CreateInBounds(var, {id1, id2}, "", context.currentBlock()->block);
 }
@@ -317,11 +411,11 @@ std::vector<NExpression *> NIdentifier::unpack(CodeGenContext &context)
     while (type->isPointerTy()) {
         type = type->getPointerElementType();
     }
-    if (context.tuples.find(type) != context.tuples.end()) {
+    if (context.tupleInfo(type)) {
         StructType *st = static_cast<StructType *>(type);
         std::vector<NExpression *> expressions;
 
-        for (int i = 0; i < st->elements().size(); ++i) {
+        for (size_t i = 0; i < st->elements().size(); ++i) {
             auto expr = new NIdentifier(token(), i);
             expr->pushContext(this);
             expressions.push_back(expr);
@@ -351,7 +445,7 @@ Value *NExpressionPack::codeGen(CodeGenContext& context)
         auto value = expr->load(context);
         values.push_back(value);
     }
-    return new LoadInst(makeTupleValue(values, "tuple", context), "", false, context.currentBlock()->block);
+    return new LoadInst(context.makeTupleValue(values, "tuple"), "", false, context.currentBlock()->block);
 }
 
 
@@ -365,7 +459,7 @@ std::vector<NExpression *> NExpressionPack::unpack(CodeGenContext &context)
     return vec;
 }
 
-static Function *makeConcreteFunction(CodeGenContext &context, NFunctionDeclaration *func, std::vector<Value *> &values)
+Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func, std::vector<Value *> &values)
 {
     fmt::print("TEMPLATE {}\n",func->id);
     std::vector<Type *> argTypes;
@@ -381,19 +475,19 @@ static Function *makeConcreteFunction(CodeGenContext &context, NFunctionDeclarat
                 auto val = *it;
                 while (val->getType()->isPointerTy()) {
                 val->dump();
-                val = new LoadInst(val, "", false, context.currentBlock()->block);
+                val = new LoadInst(val, "", false, currentBlock()->block);
                 }
                 vec.push_back(val);
             }
 //             vec.insert(vec.end(), valueIt, values.end());
-            auto tuple = makeTupleValue(vec, "tuple", context);
+            auto tuple = makeTupleValue(vec, "tuple");
             *valueIt = tuple;
             auto next = valueIt + 1;
             values.erase(next, values.end());
 
             valueType = tuple->getType();
         } else {
-            valueType = typeOf(it->type(), context);
+            valueType = typeOf(it->type());
         }
 
         valueType->dump();
@@ -401,17 +495,17 @@ static Function *makeConcreteFunction(CodeGenContext &context, NFunctionDeclarat
         templateId += typeName(valueType);
     }
 
-    if (auto func = context.concreteTemplates[templateId]) {
+    if (auto func = m_concreteTemplates[templateId]) {
         return func;
     }
 
-    FunctionType *ftype = FunctionType::get(typeOf(func->type, context), makeArrayRef(argTypes), false);
-    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, templateId.c_str(), context.module);
-    BasicBlock *bblock = BasicBlock::Create(context.TheContext, "entry", function, 0);
+    FunctionType *ftype = FunctionType::get(typeOf(func->type), makeArrayRef(argTypes), false);
+    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, templateId.c_str(), &module());
+    BasicBlock *bblock = BasicBlock::Create(context(), "entry", function, 0);
 
-    context.concreteTemplates[templateId] = function;
+    m_concreteTemplates[templateId] = function;
 
-    context.pushBlock(bblock, function, nullptr);
+    pushBlock(bblock, function, nullptr);
 
     Function::arg_iterator argsValues = function->arg_begin();
 
@@ -423,24 +517,18 @@ static Function *makeConcreteFunction(CodeGenContext &context, NFunctionDeclarat
         fmt::print("TEMPLATE ARG {}\n",typeName(*typeIt));
 
 //         it->codeGen(context);
-        AllocaInst *alloc = new AllocaInst(*typeIt, it->name().c_str(), context.currentBlock()->block);
-        context.locals()[it->name()] = alloc;
+        AllocaInst *alloc = new AllocaInst(*typeIt, it->name().c_str(), currentBlock()->block);
+        storeLocal(it->name(), alloc);
 
-        StoreInst *inst = new StoreInst(argumentValue, context.locals()[it->name()], false, bblock);
+        new StoreInst(argumentValue, local(it->name()), false, bblock);
     }
 
-    auto &data = context.functions[function];
-    data.block = context.currentBlock();
-    data.hasTupleArg = false;
-    for (auto it = func->arguments.begin(); it != func->arguments.end(); it++) {
-        auto &&name = it->name();
-        data.argumentNames.push_back(name);
+    func->block->codeGen(*this);
+    if (!currentBlock()->returned) {
+        ReturnInst::Create(context(), nullptr, currentBlock()->block);
     }
 
-    func->block->codeGen(context);
-    ReturnInst::Create(context.TheContext, context.getCurrentReturnValue(), context.currentBlock()->block);
-
-    context.popBlock();
+    popBlock();
 
     return function;
 }
@@ -455,12 +543,10 @@ static Value *loadValue(Value *value, CodeGenContext &context)
 
 static Function *findInterfaceImpl(const Token &tok, const std::string &name, const std::vector<Value *> &values, CodeGenContext &context)
 {
-    auto it = context.ifacePrototypes.find(name);
-    if (it == context.ifacePrototypes.end()) {
+    auto proto = context.ifacePrototype(name);
+    if (!proto) {
         return nullptr;
     }
-
-    auto proto = it->second;
     auto iface = proto->iface;
 
     std::cout<<"in iface "<<iface->name<<"\n";
@@ -468,12 +554,12 @@ static Function *findInterfaceImpl(const Token &tok, const std::string &name, co
     std::vector<Type *> toMatch;
     toMatch.resize(iface->parameters.size());
 
-    int numPars = proto->parameters.size();
+    size_t numPars = proto->parameters.size();
 //             int numPars = std::min(proto->parameters.size(), argExpr.size());
-    for (int i = 0; i < numPars; ++i) {
+    for (size_t i = 0; i < numPars; ++i) {
 //                 auto v = values[i]; //argExpr[i]->codeGen(context);
         auto v = values.size() > i ? values[i] : nullptr;
-        auto t = v ? v->getType() : (i == 0 ? tupleType({}, context) : nullptr);
+        auto t = v ? v->getType() : (i == 0 ? context.tupleType({}) : nullptr);
         if (!t) {
             break;
         }
@@ -495,7 +581,7 @@ static Function *findInterfaceImpl(const Token &tok, const std::string &name, co
         for (auto &&impl: iface->implementations) {
             if (impl->parameterTypes == toMatch) {
                 auto n = mangleFuncName(name, iface->name, impl->id);
-                return context.module->getFunction(n.c_str());
+                return context.module().getFunction(n.c_str());
             }
         }
         bool changed = false;
@@ -517,7 +603,7 @@ static Function *findInterfaceImpl(const Token &tok, const std::string &name, co
 
 Value *NMethodCall::codeGen(CodeGenContext& context)
 {
-    std::cout << "Creating method call: " << name << endl;
+    std::cout << "Creating method call: " << name << '\n';
 
     std::vector<NExpression *> argExpr;
 
@@ -539,20 +625,17 @@ Value *NMethodCall::codeGen(CodeGenContext& context)
     }
 
     if (name == "count") {
-        return ConstantInt::get(Type::getInt32Ty(context.TheContext), values.size(), true);
+        return ConstantInt::get(Type::getInt32Ty(context.context()), values.size(), true);
     }
 
-    Function *function = context.module->getFunction(name.c_str());
+    Function *function = context.module().getFunction(name.c_str());
 
     if (!function) {
         function = findInterfaceImpl(token(), name, values, context);
     }
 
     if (!function) {
-        auto it = context.functionTemplates.find(name);
-        if (it != context.functionTemplates.end()) {
-            function = makeConcreteFunction(context, it->second, values);
-        }
+        function = context.functionTemplate(name, values);
     }
 
     if (function == NULL) {
@@ -570,7 +653,7 @@ Value *NMethodCall::codeGen(CodeGenContext& context)
 //                 vec.push_back(argExpr[i++]->load(context));
 //             }
 //             auto tuple = makeTupleValue(vec, context);
-//             values.push_back(CastInst::CreatePointerCast(tuple, Type::getInt8PtrTy(context.TheContext), "", context.currentBlock()->block));
+//             values.push_back(CastInst::CreatePointerCast(tuple, Type::getInt8PtrTy(context.context()), "", context.currentBlock()->block));
 //
 //             auto type = tuple->getType();
 //
@@ -627,7 +710,7 @@ Value *NMethodCall::codeGen(CodeGenContext& context)
 
 Value* NAssignment::codeGen(CodeGenContext& context)
 {
-//     std::cout << "Creating assignment for " << lhs->name << " "<<this<<endl;
+//     std::cout << "Creating assignment for " << lhs->name << " "<<this<<'\n';
 
     auto lhsValue = lhs->codeGen(context);
     auto rhsValue = genRhs(context);
@@ -651,43 +734,34 @@ Value* NBlock::codeGen(CodeGenContext& context)
 	StatementList::const_iterator it;
 	Value *last = NULL;
 	for (it = statements.begin(); it != statements.end(); it++) {
-		std::cout << "block: Generating code for " << typeid(**it).name() << endl;
+		std::cout << "block: Generating code for " << typeid(**it).name() << '\n';
 		last = (**it).codeGen(context);
                 if (context.currentBlock()->returned) {
                     break;
                 }
 	}
-	std::cout << "Creating block" << endl;
+	std::cout << "Creating block" << '\n';
 	return last;
 }
 
 Value* NExpressionStatement::codeGen(CodeGenContext& context)
 {
-	std::cout << "Generating code for " << typeid(expression).name() << endl;
+	std::cout << "Generating code for " << typeid(expression).name() << '\n';
 	return expression->codeGen(context);
 }
 
 Value* NReturnStatement::codeGen(CodeGenContext& context)
 {
-    std::cout << "Generating return code for " << typeid(expression).name() << endl;
     Value *returnValue = expression ? expression->load(context) : nullptr;
 
-//     if (returnValue->getType()->isPointerTy()) {
-//         returnValue = new LoadInst(returnValue, "", false, context.currentBlock()->block);
-//     }
-
-    context.setCurrentReturnValue(returnValue);
     context.currentBlock()->returned = true;
-    return ReturnInst::Create(context.TheContext, returnValue, context.currentBlock()->block);
-
-
-    return returnValue;
+    return ReturnInst::Create(context.context(), returnValue, context.currentBlock()->block);
 }
 
 static Value *allocStoreVariable(CodeGenContext &ctx, Value *value, const std::string &name)
 {
     AllocaInst *alloc = new AllocaInst(value->getType(), name.c_str(), ctx.currentBlock()->block);
-    ctx.locals()[name] = alloc;
+    ctx.storeLocal(name, alloc);
 
     return new StoreInst(value, alloc, false, ctx.currentBlock()->block);
 }
@@ -695,7 +769,7 @@ static Value *allocStoreVariable(CodeGenContext &ctx, Value *value, const std::s
 Value* NVariableDeclaration::codeGen(CodeGenContext& context)
 {
     const auto numExpressions = expressions.size();
-    std::cout << "Creating variable declaration " << id.name() << endl;
+    std::cout << "Creating variable declaration " << id.name() << '\n';
 
     if (!type.valid()) {
         if (numExpressions == 0) {
@@ -706,13 +780,12 @@ Value* NVariableDeclaration::codeGen(CodeGenContext& context)
         return allocStoreVariable(context, value, id.name());
     }
 
-    auto t = typeOf(type, context);
+    auto t = context.typeOf(type);
     AllocaInst *alloc = new AllocaInst(t, id.name().c_str(), context.currentBlock()->block);
-    context.locals()[id.name()] = alloc;
+    context.storeLocal(id.name(), alloc);
 
-    if (t->isStructTy() && context.structsByType.find(t) != context.structsByType.end()) {
-        Struct &str = context.structs[type.name()];
-        if (numExpressions != str.fields.size()) {
+    if (auto info = context.structInfo(t)) {
+        if (numExpressions != info->fields.size()) {
             err(token(), "wrong number of initializers passed when declaring variable '{}' of type '{}'", id.name(), type.name());
         }
 
@@ -754,7 +827,7 @@ Value *NMultiVariableDeclaration::codeGen(CodeGenContext &context)
                 for (size_t j = i; j < expressions.size(); ++j) {
                     values.push_back(expressions[j]->load(context));
                 }
-                value = makeTupleValue(values, name.name(), context);
+                value = context.makeTupleValue(values, name.name());
             } else {
                 value = expr->load(context);
 
@@ -763,13 +836,13 @@ Value *NMultiVariableDeclaration::codeGen(CodeGenContext &context)
                 value = alloc;
             }
         } else {
-            value = makeTupleValue({}, name.name(), context);
+            value = context.makeTupleValue({}, name.name());
         }
 
         fmt::print("NEW MULTI {}\n",name.name());
         value->getType()->dump();
 
-        context.locals()[name.name()] = value;
+        context.storeLocal(name.name(), value);
         ++i;
     }
     return 0;
@@ -777,8 +850,8 @@ Value *NMultiVariableDeclaration::codeGen(CodeGenContext &context)
 
 Value *NFunctionArgumentDeclaration::codeGen(CodeGenContext &context)
 {
-    AllocaInst *alloc = new AllocaInst(typeOf(type(), context), name().c_str(), context.currentBlock()->block);
-    context.locals()[name()] = alloc;
+    AllocaInst *alloc = new AllocaInst(context.typeOf(type()), name().c_str(), context.currentBlock()->block);
+    context.storeLocal(name(), alloc);
     return alloc;
 }
 
@@ -787,43 +860,36 @@ Value *NExternDeclaration::codeGen(CodeGenContext &context)
     std::vector<Type *> argTypes;
     argTypes.reserve(arguments().size());
     for (auto &&arg: arguments()) {
-        argTypes.push_back(typeOf(arg.type(), context));
+        argTypes.push_back(context.typeOf(arg.type()));
     }
-    FunctionType *ftype = FunctionType::get(typeOf(returnType(), context), makeArrayRef(argTypes), isVarargs());
-    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, name().c_str(), context.module);
-
-    auto &data = context.functions[function];
-    data.hasTupleArg = false;
-    for (auto &&arg: arguments()) {
-        data.argumentNames.push_back(arg.name());
-    }
+    FunctionType *ftype = FunctionType::get(context.typeOf(returnType()), makeArrayRef(argTypes), isVarargs());
+    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, name().c_str(), &context.module());
 
     return function;
 }
 
 Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 {
-    if (context.module->getFunction(id.c_str()) || context.functionTemplates.find(id) != context.functionTemplates.end()) {
-        std::cerr << "error: function '" << id.c_str() << "' is already declared.\n";
-        exit(1);
+    if (!context.isFunctionNameAvailable(id)) {
+        err(token(), "function '{}' is already declared", id);
     }
 
-	vector<Type*> argTypes;
-	for (auto it = arguments.begin(); it != arguments.end(); it++) {
-            if (it->type().name() == "(...)") {
-                context.functionTemplates[id] = this;
-                return nullptr;
-            }
-            argTypes.push_back(typeOf(it->type(), context));
-	}
-	auto retType = typeOf(type, context);
-	FunctionType *ftype = FunctionType::get(retType, makeArrayRef(argTypes), false);
-	Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.c_str(), context.module);
-	BasicBlock *bblock = BasicBlock::Create(context.TheContext, "entry", function, 0);
+    std::vector<Type *> argTypes;
+    for (auto it = arguments.begin(); it != arguments.end(); it++) {
+        if (it->type().name() == "(...)") {
+            context.addFunctionTemplate(this);
+            return nullptr;
+        }
+        argTypes.push_back(context.typeOf(it->type()));
+    }
+    auto retType = context.typeOf(type);
+    FunctionType *ftype = FunctionType::get(retType, makeArrayRef(argTypes), false);
+    Function *function = Function::Create(ftype, GlobalValue::ExternalLinkage, id.c_str(), &context.module());
+    BasicBlock *bblock = BasicBlock::Create(context.context(), "entry", function, 0);
 
-	context.pushBlock(bblock, function, nullptr);
+    context.pushBlock(bblock, function, nullptr);
 
-	Function::arg_iterator argsValues = function->arg_begin();
+    Function::arg_iterator argsValues = function->arg_begin();
     Value* argumentValue;
 
 	for (auto it = arguments.begin(); it != arguments.end(); it++) {
@@ -831,86 +897,45 @@ Value* NFunctionDeclaration::codeGen(CodeGenContext& context)
 		argumentValue->setName(it->name().c_str());
 
                 it->codeGen(context);
-		StoreInst *inst = new StoreInst(argumentValue, context.locals()[it->name()], false, bblock);
+		new StoreInst(argumentValue, context.local(it->name()), false, bblock);
 	}
 
-        auto &data = context.functions[function];
-        data.block = context.currentBlock();
-        data.hasTupleArg = false;
-        for (auto it = arguments.begin(); it != arguments.end(); it++) {
-            auto &&name = it->name();
-            data.argumentNames.push_back(name);
-        }
-	
 	block->codeGen(context);
-//         if (
-	ReturnInst::Create(context.TheContext, context.getCurrentReturnValue(), context.currentBlock()->block);
+        if (!context.currentBlock()->returned) {
+            ReturnInst::Create(context.context(), nullptr, context.currentBlock()->block);
+        }
 
 	context.popBlock();
-	std::cout << "Creating function: " << id << endl;
+	std::cout << "Creating function: " << id << '\n';
 	return function;
 }
 
 Value* NStructDeclaration::codeGen(CodeGenContext& context)
 {
-    std::cout << "Creating struct declaration " << " " << id << endl;
-    vector<Type *> argTypes;
+    std::cout << "Creating struct declaration " << " " << id << '\n';
+    std::vector<Type *> argTypes;
     for (auto it = elements.begin(); it != elements.end(); it++) {
-        argTypes.push_back(typeOf(it->type, context));
+        argTypes.push_back(context.typeOf(it->type));
         std::cout<<"    with arg " << it->type.name() << " " <<it->id.name()<<"\n";
     }
-    StructType *type = StructType::create(context.TheContext, argTypes, id.c_str());
-    Struct &str = context.structs[id];
-    str.type = type;
-    str.fields.reserve(elements.size());
-    context.structsByType[type] = &str;
+    StructType *type = StructType::create(context.context(), argTypes, id.c_str());
+    auto info = context.newStructType(type);
+    info->type = type;
+    info->fields.reserve(elements.size());
     for (auto &&el: elements) {
-        str.fields.push_back(el.id.name());
+        info->fields.push_back(el.id.name());
     }
     return 0;
 }
 
-Value *NTuple::codeGen(CodeGenContext& context)
-{
-    auto name = std::string("tuple") + std::to_string(context.tuples.size());
-    std::cout << "Creating tuple declaration " << name << expressions.size()<<"\n";
-
-    std::vector<Value *> values;
-    std::vector<Type *> argTypes;
-    for (auto &&expr: expressions) {
-        auto value = expr->codeGen(context);
-        values.push_back(value);
-        argTypes.push_back(value->getType());
-    }
-
-    StructType *type = StructType::create(context.TheContext, argTypes, name.c_str());
-    Tuple &tuple = context.tuples[type];
-    tuple.type = type;
-
-    AllocaInst *alloc = new AllocaInst(type, name.c_str(), context.currentBlock()->block);
-
-    int id = 0;
-    for (auto &&v: values) {
-        auto id1 = ConstantInt::get(context.TheContext, llvm::APInt(32, 0, false));
-        auto id2 = ConstantInt::get(context.TheContext, llvm::APInt(32, id++, false));
-
-        auto value = GetElementPtrInst::CreateInBounds(alloc, {id1, id2}, "", context.currentBlock()->block);
-        new StoreInst(v, value, false, context.currentBlock()->block);
-    }
-
-//     return new LoadInst(alloc, "", false, context.currentBlock()->block);
-    return alloc;
-}
-
 Value *NIfaceDeclaration::codeGen(CodeGenContext &context)
 {
-    context.interfaces[name] = this;
+    context.addInterface(this);
     if (prototypes.size() == 0) {
         error("cannot create an empty interface");
     }
     for (auto &&p: prototypes) {
         p->iface = this;
-        context.ifacePrototypes[p->name] = p;
     }
 
     return 0;
@@ -918,12 +943,10 @@ Value *NIfaceDeclaration::codeGen(CodeGenContext &context)
 
 Value *NImplDeclaration::codeGen(CodeGenContext &context)
 {
-    auto it = context.interfaces.find(name);
-    if (it == context.interfaces.end()) {
+    NIfaceDeclaration *iface = context.interface(name);
+    if (!iface) {
         error("trying to implement unknown interface '{}'", name);
     }
-
-    NIfaceDeclaration *iface = it->second;
 
     for (auto &&p: iface->prototypes) {
         bool hasProto = false;
@@ -954,7 +977,7 @@ Value *NImplDeclaration::codeGen(CodeGenContext &context)
 
     raw_string_ostream stream(id);
     for (auto &&par: parameters) {
-        auto t = typeOf(TypeName(par.token(), par.name()), context);
+        auto t = context.typeOf(TypeName(par.token(), par.name()));
         t->print(stream);
         parameterTypes.push_back(t);
     }
@@ -980,9 +1003,9 @@ Value *NIfStatement::codeGen(CodeGenContext &ctx)
     }
 
     auto curBlock = ctx.currentBlock();
-    BasicBlock *ifblock = BasicBlock::Create(ctx.TheContext, "if", curBlock->function, 0);
-    BasicBlock *elseblock = elseBlock() ? BasicBlock::Create(ctx.TheContext, "else", curBlock->function, 0) : nullptr;
-    BasicBlock *afterblock = BasicBlock::Create(ctx.TheContext, "endif", curBlock->function, 0);
+    BasicBlock *ifblock = BasicBlock::Create(ctx.context(), "if", curBlock->function, 0);
+    BasicBlock *elseblock = elseBlock() ? BasicBlock::Create(ctx.context(), "else", curBlock->function, 0) : nullptr;
+    BasicBlock *afterblock = BasicBlock::Create(ctx.context(), "endif", curBlock->function, 0);
 
     ctx.pushBlock(ifblock, curBlock->function, curBlock);
     block()->codeGen(ctx);
@@ -1002,15 +1025,14 @@ Value *NIfStatement::codeGen(CodeGenContext &ctx)
 
     auto branch = BranchInst::Create(ifblock, elseblock ? elseblock : afterblock, cond, ctx.currentBlock()->block);
 
-    ctx.popBlock();
-    ctx.pushBlock(afterblock, curBlock->function, curBlock);
+    ctx.currentBlock()->block = afterblock;
 
     return branch;
 }
 
 Value *NExternVariableDeclaration::codeGen(CodeGenContext &ctx)
 {
-    auto ty = typeOf(type(), ctx);
-    auto val = new GlobalVariable(*ctx.module, ty, false, GlobalValue::ExternalLinkage, nullptr, name().c_str());
+    auto ty = ctx.typeOf(type());
+    auto val = new GlobalVariable(ctx.module(), ty, false, GlobalValue::ExternalLinkage, nullptr, name().c_str());
     return val;
 }

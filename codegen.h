@@ -18,68 +18,84 @@
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <llvm/Support/raw_ostream.h>
 
-using namespace llvm;
-
 class NBlock;
 class NIdentifier;
 class NIfaceDeclaration;
 class NIfacePrototype;
 class NFunctionDeclaration;
+class TypeName;
 
 class CodeGenBlock {
 public:
-    BasicBlock *block;
-    Function *function;
-    Value *returnValue;
+    llvm::BasicBlock *block;
+    llvm::Function *function;
     CodeGenBlock *parent;
-    std::map<std::string, Value*> locals;
+    std::unordered_map<std::string, llvm::Value *> locals;
     bool returned;
 };
 
-struct Struct {
-    Type *type;
+struct StructInfo {
+    llvm::Type *type;
     std::vector<std::string> fields;
 };
 
-struct FunctionData {
-    std::vector<std::string> argumentNames;
-    bool hasTupleArg;
-    CodeGenBlock *block;
-};
-
-struct Tuple {
-    Type *type;
+struct TupleInfo {
+    llvm::Type *type;
 };
 
 class CodeGenContext {
-    std::stack<CodeGenBlock *> blocks;
-    Function *mainFunction;
-
 public:
-    std::unordered_map<std::string, Struct> structs;
-    std::unordered_map<std::string, StructType *> tupleTypes;
-    std::unordered_map<Type *, Struct *> structsByType;
-    std::unordered_map<Type *, Tuple> tuples;
-    std::unordered_map<Function *, FunctionData> functions;
+    CodeGenContext();
 
-    std::unordered_map<std::string, NIfacePrototype *> ifacePrototypes;
-    std::unordered_map<std::string, NIfaceDeclaration *> interfaces;
-    std::unordered_map<std::string, NFunctionDeclaration *> functionTemplates;
-    std::unordered_map<std::string, Function *> concreteTemplates;
+    bool isFunctionNameAvailable(const std::string &name) const;
 
-    Module *module;
-    LLVMContext TheContext;
-    CodeGenContext() { module = new Module("main", TheContext); }
+    llvm::LLVMContext &context() { return m_context; }
+    llvm::Module &module() { return *m_module.get(); }
+    const llvm::Module &module() const { return *m_module.get(); }
+    llvm::Value *findValue(const NIdentifier &ident);
 
-    Value *findValue(const NIdentifier &ident);
+    llvm::Type *typeOf(const TypeName &type);
 
-    void generateCode(NBlock& root);
+    const StructInfo *structInfo(llvm::Type *type) const;
+    StructInfo *newStructType(llvm::StructType *type);
+
+    llvm::StructType *tupleType(const std::vector<llvm::Type *> &argTypes);
+    llvm::Value *makeTupleValue(const std::vector<llvm::Value *> &values, const std::string &name);
+
+    const TupleInfo *tupleInfo(llvm::Type *type) const;
+
+    NIfacePrototype *ifacePrototype(const std::string &name) const;
+    NIfaceDeclaration *interface(const std::string &name) const;
+    void addInterface(NIfaceDeclaration *iface);
+
+    llvm::Function *functionTemplate(const std::string &name, std::vector<llvm::Value *> &values);
+    void addFunctionTemplate(NFunctionDeclaration *func);
+
+    void generateCode(NBlock &root);
+
     void writeOutput(const std::string &filename);
-    GenericValue runCode();
-    std::map<std::string, Value*>& locals() { return blocks.top()->locals; }
-    CodeGenBlock *currentBlock() { return blocks.top(); }
-    void pushBlock(BasicBlock *block, Function *function, CodeGenBlock *parent) { blocks.push(new CodeGenBlock{block, function, nullptr, parent, {}, false }); }
-    void popBlock() { CodeGenBlock *top = blocks.top(); blocks.pop(); }
-    void setCurrentReturnValue(Value *value) { blocks.top()->returnValue = value; }
-    Value* getCurrentReturnValue() { return blocks.top()->returnValue; }
+
+    void storeLocal(const std::string &name, llvm::Value *value);
+    llvm::Value *local(const std::string &name) const;
+
+    const CodeGenBlock *currentBlock() const { return &m_blocks.top(); }
+    CodeGenBlock *currentBlock() { return &m_blocks.top(); }
+    void pushBlock(llvm::BasicBlock *block, llvm::Function *function, CodeGenBlock *parent);
+    void popBlock();
+
+private:
+    llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<llvm::Value *> &values);
+
+    std::stack<CodeGenBlock> m_blocks;
+    llvm::Function *m_mainFunction;
+    llvm::LLVMContext m_context;
+    std::unique_ptr<llvm::Module> m_module;
+    std::unordered_map<std::string, StructInfo> m_structInfo;
+    std::unordered_map<llvm::Type *, StructInfo *> m_structInfoByType;
+    std::unordered_map<std::string, llvm::StructType *> m_tupleTypes;
+    std::unordered_map<llvm::Type *, TupleInfo> m_tupleInfo;
+    std::unordered_map<std::string, NIfacePrototype *> m_ifacePrototypes;
+    std::unordered_map<std::string, NIfaceDeclaration *> m_interfaces;
+    std::unordered_map<std::string, NFunctionDeclaration *> m_functionTemplates;
+    std::unordered_map<std::string, llvm::Function *> m_concreteTemplates;
 };

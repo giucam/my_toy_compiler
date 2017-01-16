@@ -329,16 +329,6 @@ public:
     llvm::Value *codeGen(CodeGenContext& context) override;
 };
 
-class NTuple : public NExpression {
-public:
-    NTuple(): NExpression() {}
-    void add(NExpression *expr) { expressions.push_back(expr); }
-
-    llvm::Value *codeGen(CodeGenContext& context) override;
-
-    std::vector<NExpression *> expressions;
-};
-
 class NIfaceDeclaration: public NStatement {
 public:
     NIfaceDeclaration(const std::string &name, std::vector<TypeName> &par, NIfacePrototypeList &pro) : name(name) { std::swap(parameters, par); std::swap(prototypes, pro); }
