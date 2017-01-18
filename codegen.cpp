@@ -783,7 +783,7 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
         llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
         auto value = createValue(ctx, alloc, t);
 
-        new llvm::StoreInst(value.unpack()[0].value, init->unpack()[0].value, false, ctx.currentBlock()->block);
+        new llvm::StoreInst(init->unpack()[0].value, value.unpack()[0].value, false, ctx.currentBlock()->block);
         return value;
     } else {
         std::vector<Value::V> values;
