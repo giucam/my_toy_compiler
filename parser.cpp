@@ -145,6 +145,12 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
             err(tok, "multibyte char literal");
         }
         return std::make_unique<NInteger>(tok, tok.text().data()[0]);
+    } else if (tok.type() == Token::Type::True) {
+        nextToken();
+        return std::make_unique<NBoolean>(tok, true);
+    } else if (tok.type() == Token::Type::False) {
+        nextToken();
+        return std::make_unique<NBoolean>(tok, false);
     }
     return nullptr;
 }

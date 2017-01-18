@@ -88,6 +88,13 @@ public:
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
+class NBoolean : public NExpression {
+public:
+    bool value;
+    NBoolean(const Token &tok, bool value) : NExpression(tok), value(value) { }
+    Optional<Value> codeGen(CodeGenContext &context) override;
+};
+
 class NDouble : public NExpression {
 public:
     double value;

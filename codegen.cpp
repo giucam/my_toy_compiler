@@ -307,6 +307,11 @@ Optional<Value> NInteger::codeGen(CodeGenContext &context)
     return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context.context()), value, true));
 }
 
+Optional<Value> NBoolean::codeGen(CodeGenContext &context)
+{
+    return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt1Ty(context.context()), value, true));
+}
+
 Optional<Value> NDouble::codeGen(CodeGenContext &context)
 {
     std::cout << "Creating double: " << value << '\n';
@@ -1061,7 +1066,7 @@ Optional<Value> NWhileStatement::codeGen(CodeGenContext &ctx)
 
     ctx.pushBlock(condblock, curBlock->function, curBlock);
     auto cond = condition()->codeGen(ctx)->extract(0);
-    llvm::BranchInst::Create(whileblock, afterblock, cond.value, ctx.currentBlock()->block);
+    llvm::BranchInst::Create(whileblock, afterblock, cond.load(ctx), ctx.currentBlock()->block);
     ctx.popBlock();
 
     ctx.pushBlock(whileblock, curBlock->function, curBlock);
