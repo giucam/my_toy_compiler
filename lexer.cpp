@@ -89,6 +89,8 @@ Token Lexer::token(const std::string &str) const
         return token(Token::Type::Else);
     } else if (str == "mut") {
         return token(Token::Type::Mut);
+    } else if (str == "while") {
+        return token(Token::Type::While);
     }
 
     return token(Token::Type::Identifier);

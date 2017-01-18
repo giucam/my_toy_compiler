@@ -36,6 +36,7 @@ private:
     void parseExpressionStatement();
     TypeName parseType();
     void parseIf();
+    void parseWhile();
 
     std::string m_filename;
     Lexer m_lexer;

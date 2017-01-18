@@ -492,8 +492,6 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 
     auto typeIt = argTypes.begin();
     for (auto it = func->arguments.begin(); it != func->arguments.end(); ++it, ++typeIt) {
-        fmt::print("TEMPLATE ARG {}\n",typeName(*typeIt));
-
         if (it->type().name() == "(...)") {
             std::vector<Value::V> values;
             for (; typeIt != argTypes.end(); ++typeIt) {
@@ -1048,6 +1046,32 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
     }
 
     llvm::BranchInst::Create(ifblock, elseblock ? elseblock : afterblock, cond.value, ctx.currentBlock()->block);
+
+    ctx.currentBlock()->block = afterblock;
+
+    return {};
+}
+
+Optional<Value> NWhileStatement::codeGen(CodeGenContext &ctx)
+{
+    auto curBlock = ctx.currentBlock();
+    llvm::BasicBlock *condblock = llvm::BasicBlock::Create(ctx.context(), "cond", curBlock->function, 0);
+    llvm::BasicBlock *whileblock = llvm::BasicBlock::Create(ctx.context(), "while", curBlock->function, 0);
+    llvm::BasicBlock *afterblock = llvm::BasicBlock::Create(ctx.context(), "endwhile", curBlock->function, 0);
+
+    ctx.pushBlock(condblock, curBlock->function, curBlock);
+    auto cond = condition()->codeGen(ctx)->extract(0);
+    llvm::BranchInst::Create(whileblock, afterblock, cond.value, ctx.currentBlock()->block);
+    ctx.popBlock();
+
+    ctx.pushBlock(whileblock, curBlock->function, curBlock);
+    block()->codeGen(ctx);
+    if (!ctx.currentBlock()->returned) {
+        llvm::BranchInst::Create(condblock, ctx.currentBlock()->block);
+    }
+    ctx.popBlock();
+
+    llvm::BranchInst::Create(condblock, ctx.currentBlock()->block);
 
     ctx.currentBlock()->block = afterblock;
 

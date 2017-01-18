@@ -436,6 +436,20 @@ void Parser::parseIf()
     m_block->statements.push_back(stmt);
 }
 
+void Parser::parseWhile()
+{
+    nextToken(Token::Type::While);
+
+    nextToken(Token::Type::LeftParens);
+    auto expr = parseExpression();
+    nextToken(Token::Type::RightParens);
+
+    auto block = parseBlock();
+
+    auto stmt = new NWhileStatement(std::move(expr), block);
+    m_block->statements.push_back(stmt);
+}
+
 void Parser::parseStatements()
 {
     fmt::print("block\n");
@@ -472,6 +486,9 @@ void Parser::parseStatements()
             break;
         case Token::Type::If:
             parseIf();
+            break;
+        case Token::Type::While:
+            parseWhile();
             break;
         case Token::Type::RightBrace:
             fmt::print("br\n");

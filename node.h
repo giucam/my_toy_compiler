@@ -419,4 +419,19 @@ private:
     NBlock *m_elseBlock;
 };
 
+class NWhileStatement : public NStatement
+{
+public:
+    NWhileStatement(std::unique_ptr<NExpression> condition, NBlock *block) : m_condition(std::move(condition)), m_block(block) {}
+
+    NExpression *condition() const { return m_condition.get(); }
+    NBlock *block() { return m_block; }
+
+    Optional<Value> codeGen(CodeGenContext &context) override;
+
+private:
+    std::unique_ptr<NExpression> m_condition;
+    NBlock *m_block;
+};
+
 #endif
