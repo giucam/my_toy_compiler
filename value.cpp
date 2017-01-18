@@ -16,16 +16,16 @@ Value simpleValue(llvm::Value *val, llvm::Type *t)
         {
             return values;
         }
-        llvm::Value *extract(int id) const
+        Value::V extract(int id) const
         {
             if (id != 0) {
                 throw OutOfRangeException(typeName(values[0].type), 1);
             }
-            return values[id].value;
+            return values[0];
         }
-        llvm::Value *extract(const std::string &name) const
+        Value::V extract(const std::string &name) const
         {
-            return nullptr;
+            return { nullptr, nullptr };
         }
 
         SimpleValH clone(std::vector<Value::V> &values) const
@@ -47,7 +47,7 @@ struct ValuePackH
     {
         return values;
     }
-    llvm::Value *extract(int id) const
+    Value::V extract(int id) const
     {
         if (id < 0 || id >= (int)values.size()) {
             std::string name = "(";
@@ -62,11 +62,11 @@ struct ValuePackH
 
             throw OutOfRangeException(name, values.size());
         }
-        return unpack()[id].value;
+        return unpack()[id];
     }
-    llvm::Value *extract(const std::string &name) const
+    Value::V extract(const std::string &name) const
     {
-        return nullptr;
+        return { nullptr, nullptr };
     }
     ValuePackH clone(std::vector<Value::V> &values) const
     {
@@ -93,7 +93,7 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
         {
             return value;
         }
-        llvm::Value *extract(int id) const
+        Value::V extract(int id) const
         {
             if (id < 0 || id >= (int)info->fields.size()) {
                 throw OutOfRangeException(typeName(info->type), info->fields.size());
@@ -107,9 +107,11 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
             auto id1 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, 0, false));
             auto id2 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, id, false));
 
-            return llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block);
+            auto st = static_cast<llvm::StructType *>(info->type);
+
+            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), st->elements()[id] };
         }
-        llvm::Value *extract(const std::string &name) const
+        Value::V extract(const std::string &name) const
         {
             int id = -1;
             for (size_t i = 0; i < info->fields.size(); ++i) {
@@ -149,17 +151,17 @@ Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeG
         {
             return value;
         }
-        llvm::Value *extract(int id) const
+        Value::V extract(int id) const
         {
             if (id != 0) {
                 throw OutOfRangeException(typeName(value[0].type), 1);
             }
-            return value[0].value;
+            return value[0];
         }
-        llvm::Value *extract(const std::string &name) const
+        Value::V extract(const std::string &name) const
         {
             throw InvalidFieldException(typeName(info->type));
-            return nullptr;
+            return { nullptr, nullptr };
         }
         ValuePackH clone(std::vector<Value::V> &values) const
         {

@@ -171,12 +171,12 @@ aaa.0=3;
 // tuple.print();
 // printValues(4,5,gg,sss);
 
-let s = bla.s1;
+let s = bla.s1.f;
 
 let t = rettuple(3);
 let tt = t;
 
-print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", gg, tt.1, sss, "poop", bla);
+print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", s, tt.1, sss, "poop", bla);
 // print("c {}\n",tup.count());
 
 // let tup = tuple;

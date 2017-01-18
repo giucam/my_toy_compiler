@@ -46,8 +46,8 @@ private:
         virtual ~IfaceBase() {}
 
         virtual const std::vector<Value::V> &unpack() const = 0;
-        virtual llvm::Value *extract(int id) const = 0;
-        virtual llvm::Value *extract(const std::string &name) const = 0;
+        virtual Value::V extract(int id) const = 0;
+        virtual Value::V extract(const std::string &name) const = 0;
 
         virtual std::shared_ptr<const IfaceBase> clone(std::vector<V> &values) const = 0;
     };
@@ -56,8 +56,8 @@ private:
     {
         Iface(T h) : handler(std::move(h)) {}
         const std::vector<Value::V> &unpack() const override { return handler.unpack(); }
-        llvm::Value *extract(int id) const override { return handler.extract(id); }
-        llvm::Value *extract(const std::string &name) const override { return handler.extract(name); }
+        Value::V extract(int id) const override { return handler.extract(id); }
+        Value::V extract(const std::string &name) const override { return handler.extract(name); }
         std::shared_ptr<const IfaceBase> clone(std::vector<V> &values) const override { auto clone = handler.clone(values); return std::make_shared<Iface<decltype(clone)>>(clone); }
         T handler;
     };
@@ -71,8 +71,8 @@ public:
         : m_iface(iface) {}
 
     inline const std::vector<V> &unpack() const { return m_iface->unpack(); }
-    inline llvm::Value *extract(int id) const { return m_iface->extract(id); }
-    inline llvm::Value *extract(const std::string &name) const { return m_iface->extract(name); }
+    inline Value::V extract(int id) const { return m_iface->extract(id); }
+    inline Value::V extract(const std::string &name) const { return m_iface->extract(name); }
 
     Value clone(std::vector<V> &values) const { return Value(m_iface->clone(values)); }
 

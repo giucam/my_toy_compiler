@@ -361,7 +361,7 @@ Optional<Value> NIdentifier::codeGen(CodeGenContext &ctx)
         if (type == NIdentifier::Index) {
             try {
                 auto val = parent->extract(index);
-                return createValue(ctx, val, val->getType());
+                return createValue(ctx, val.value, val.type);
             } catch (OutOfRangeException &ex) {
                 err(token(), "invalid index '{}' when accessing aggregate of type '{}' with {} elements", index, ex.type, ex.size);
             }
@@ -369,7 +369,7 @@ Optional<Value> NIdentifier::codeGen(CodeGenContext &ctx)
         } else {
             try {
                 auto val = parent->extract(name);
-                return createValue(ctx, val, val->getType());
+                return createValue(ctx, val.value, val.type);
             } catch (InvalidFieldException &ex) {
                 err(token(), "struct '{}' has no field named '{}'", ex.type, name);
             }
@@ -412,8 +412,8 @@ Optional<Value> NAddressOfExpression::codeGen(CodeGenContext &context)
             return RefValueH(value, values);
         }
 
-        llvm::Value *extract(int id) const { return value.extract(id); }
-        llvm::Value *extract(const std::string &name) const { return value.extract(name); }
+        Value::V extract(int id) const { auto v = value.extract(id); return { v.value, v.value->getType() }; }
+        Value::V extract(const std::string &name) const { auto v = value.extract(name); return { v.value, v.value->getType() }; }
     };
 
     std::vector<Value::V> values;
@@ -1001,12 +1001,11 @@ Optional<Value> NImplDeclaration::codeGen(CodeGenContext &context)
 Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
 {
     auto cond = condition()->codeGen(ctx)->extract(0);
-    cond->dump();
 
-    if (cond->getType()->isPointerTy()) {
-        cond = new llvm::LoadInst(cond, "", false, ctx.currentBlock()->block);
-        auto t = static_cast<llvm::PointerType *>(cond->getType());
-        cond = new llvm::ICmpInst(*ctx.currentBlock()->block, llvm::CmpInst::ICMP_NE, cond, llvm::ConstantPointerNull::get(t));
+    if (cond.value->getType()->isPointerTy()) {
+        cond.value = new llvm::LoadInst(cond.value, "", false, ctx.currentBlock()->block);
+        auto t = static_cast<llvm::PointerType *>(cond.value->getType());
+        cond.value = new llvm::ICmpInst(*ctx.currentBlock()->block, llvm::CmpInst::ICMP_NE, cond.value, llvm::ConstantPointerNull::get(t));
     }
 
     auto curBlock = ctx.currentBlock();
@@ -1030,7 +1029,7 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
         ctx.popBlock();
     }
 
-    llvm::BranchInst::Create(ifblock, elseblock ? elseblock : afterblock, cond, ctx.currentBlock()->block);
+    llvm::BranchInst::Create(ifblock, elseblock ? elseblock : afterblock, cond.value, ctx.currentBlock()->block);
 
     ctx.currentBlock()->block = afterblock;
 
