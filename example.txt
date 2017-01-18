@@ -93,6 +93,12 @@ impl printable(()) {
 //     return a;
 // }
 //
+
+func rettuple(a: i32): (i32, i32)
+{
+    return (a, a * a);
+}
+
 func print(format: string, values: (...)): void
 {
     let ptr = strchr(format, '{');
@@ -167,7 +173,10 @@ aaa.0=3;
 
 let s = bla.s1;
 
-print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", s, gg, sss, "poop", bla);
+let t = rettuple(3);
+let tt = t;
+
+print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", gg, tt.1, sss, "poop", bla);
 // print("c {}\n",tup.count());
 
 // let tup = tuple;

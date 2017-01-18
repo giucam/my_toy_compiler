@@ -45,7 +45,7 @@ void CodeGenContext::writeOutput(const std::string &filename)
     m_module->print(stream, nullptr);
 }
 
-static std::string typeName(llvm::Type *ty)
+std::string typeName(llvm::Type *ty)
 {
     std::string str;
     while (ty->isPointerTy()) {
@@ -139,15 +139,21 @@ llvm::Type *CodeGenContext::typeOf(const TypeName &type)
             size_t start = 1;
             size_t end = 1;
             while (start < name.size()) {
-                end = name.find(',', end);
+                if (name[start] == ' ') {
+                    start++;
+                    continue;
+                }
+                end = name.find(',', start);
                 if (end == std::string::npos) {
                     if (start == 1) {
                         break;
                     } else {
-                        end = name.size() - 2;
+                        end = name.size() - 1;
                     }
                 }
-                types.push_back(typeOf(TypeName(type.token(), name.substr(start, end))));
+                auto t = name.substr(start, end - start);
+                start = end + 1;
+                types.push_back(typeOf(TypeName(type.token(), t)));
             }
             return tupleType(types);
         }
@@ -292,153 +298,6 @@ llvm::Value *CodeGenContext::allocate(llvm::Type *type, const std::string &name,
     return alloc;
 }
 
-llvm::Value *Value::V::load(CodeGenContext &ctx) const
-{
-    return ctx.convertTo(value, type);
-}
-
-class OutOfRangeException
-{
-public:
-    OutOfRangeException(const std::string &type, int size) : type(type), size(size) {}
-
-    std::string type;
-    int size;
-};
-
-class InvalidFieldException
-{
-public:
-    InvalidFieldException(const std::string &type) : type(type) {}
-    std::string type;
-};
-
-Value simpleValue(llvm::Value *val, llvm::Type *t)
-{
-    struct SimpleValH
-    {
-        SimpleValH(llvm::Value *val, llvm::Type *t) : values({{val, t }}) {}
-
-        const std::vector<Value::V> &unpack() const
-        {
-            return values;
-        }
-        llvm::Value *extract(int id) const
-        {
-            return values[id].value;
-        }
-        llvm::Value *extract(const std::string &name) const
-        {
-            return nullptr;
-        }
-
-        SimpleValH clone(std::vector<Value::V> &values) const
-        {
-            return SimpleValH(values[0].value, values[0].type);
-        }
-
-        std::vector<Value::V> values;
-    };
-    SimpleValH h(val, t);
-    return Value(std::move(h));
-}
-
-Value valuePack(std::vector<Value::V> &vec)
-{
-    struct ValuePackH
-    {
-        ValuePackH(std::vector<Value::V> &vec) { std::swap(vec, values); }
-        std::vector<Value::V> values;
-        const std::vector<Value::V> &unpack() const
-        {
-            return values;
-        }
-        llvm::Value *extract(int id) const
-        {
-            if (id < 0 || id >= (int)values.size()) {
-                std::string name = "(";
-                for (auto it = values.begin(); it != values.end(); ++it) {
-                    auto &&v = *it;
-                    name += typeName(v.type);
-                    if (it + 1 != values.end()) {
-                        name += ", ";
-                    }
-                }
-                name += ")";
-
-                throw OutOfRangeException(name, values.size());
-            }
-            return unpack()[id].value;
-        }
-        llvm::Value *extract(const std::string &name) const
-        {
-            return nullptr;
-        }
-        ValuePackH clone(std::vector<Value::V> &values) const
-        {
-            return ValuePackH(values);
-        }
-    };
-    ValuePackH h(vec);
-    return Value(std::move(h));
-}
-
-Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
-{
-    struct StructValueH
-    {
-        StructValueH(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
-            : value({{alloc, type}}), info(i), ctx(c)
-        {
-        }
-
-        const std::vector<Value::V> &unpack() const
-        {
-            return value;
-        }
-        llvm::Value *extract(int id) const
-        {
-            if (id < 0 || id >= (int)info->fields.size()) {
-                throw OutOfRangeException(typeName(info->type), info->fields.size());
-            }
-
-            auto v = value[0].value;
-            while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
-                v = new llvm::LoadInst(v, "", false, ctx.currentBlock()->block);
-            }
-
-            auto id1 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, 0, false));
-            auto id2 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, id, false));
-
-            return llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block);
-        }
-        llvm::Value *extract(const std::string &name) const
-        {
-            int id = -1;
-            for (size_t i = 0; i < info->fields.size(); ++i) {
-                if (info->fields[i] == name) {
-                    id = i;
-                    break;
-                }
-            }
-            if (id == -1) {
-                throw InvalidFieldException(typeName(info->type));
-            }
-            return extract(id);
-        }
-        StructValueH clone(std::vector<Value::V> &values) const
-        {
-            return StructValueH(values[0].value, values[0].type, info, ctx);
-        }
-
-        std::vector<Value::V> value;
-        const StructInfo *info;
-        CodeGenContext &ctx;
-    };
-    StructValueH h(alloc, type, i, c);
-    return Value(std::move(h));
-}
-
 /* -- Code Generation -- */
 
 Optional<Value> NInteger::codeGen(CodeGenContext &context)
@@ -484,9 +343,13 @@ static Value createValue(CodeGenContext &ctx, llvm::Value *value, llvm::Type *va
     while (type->isPointerTy()) {
         type = type->getPointerElementType();
     }
+
     if (type->isStructTy()) {
-        auto info = ctx.structInfo(type);
-        return structValue(value, valueType, info, ctx);
+        if (auto info = ctx.structInfo(type)) {
+            return structValue(value, valueType, info, ctx);
+        } else if (auto info = ctx.tupleInfo(type)) {
+            return tupleValue(value, valueType, info, ctx);
+        }
     }
     return simpleValue(value, valueType);
 }
@@ -786,7 +649,7 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
     }
 
     llvm::CallInst *call = llvm::CallInst::Create(function, llvm::makeArrayRef(vals), "", context.currentBlock()->block);
-    return simpleValue(call);
+    return createValue(context, call, function->getReturnType());
 }
 
 Optional<Value> NAssignment::codeGen(CodeGenContext &context)
@@ -870,10 +733,29 @@ Optional<Value> NReturnStatement::codeGen(CodeGenContext &context)
     llvm::Value *llvmval = nullptr;
     if (returnValue) {
         auto vals = returnValue->unpack();
-        assert(vals.size() == 1);
-        auto type = vals.front().value->getType();
+        llvm::Type *type = nullptr;
         auto retType = context.currentBlock()->function->getReturnType();
-        llvmval = context.convertTo(vals.front().value, retType);
+        if (vals.size() == 1) {
+            type = vals.front().value->getType();
+            llvmval = context.convertTo(vals.front().value, retType);
+        } else if (retType->isStructTy()) {
+            auto tt = static_cast<llvm::StructType *>(retType);
+            auto types = tt->elements();
+            if (types.size() == vals.size()) {
+                auto typeIt = types.begin();
+                std::vector<llvm::Value *> values;
+                for (auto &&v: vals) {
+                    auto value = context.convertTo(v.value, *typeIt++);
+                    if (!value) {
+                        break;
+                    }
+                    values.push_back(value);
+                }
+                llvmval = context.makeTupleValue(values, "ret");
+                type = llvmval->getType();
+                llvmval = context.convertTo(llvmval, retType);
+            }
+        }
         if (!llvmval) {
             err(token(), "wrong return type for function. found '{}', expected '{}'", typeName(type), typeName(retType));
         }

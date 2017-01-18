@@ -18,6 +18,7 @@ set(SOURCES
     operators.cpp
     lexer.cpp
     parser.cpp
+    value.cpp
     fmt/format.cc
     fmt/ostream.cc)
 

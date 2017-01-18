@@ -22,6 +22,8 @@
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include "value.h"
+
 class NBlock;
 class NIdentifier;
 class NIfaceDeclaration;
@@ -45,57 +47,6 @@ private:
     bool m_valid;
     T m_value;
 };
-
-class Value {
-public:
-    struct V {
-        llvm::Value *value;
-        llvm::Type *type;
-
-        llvm::Value *load(CodeGenContext &ctx) const;
-    };
-
-private:
-    struct IfaceBase
-    {
-        virtual ~IfaceBase() {}
-
-        virtual const std::vector<Value::V> &unpack() const = 0;
-        virtual llvm::Value *extract(int id) const = 0;
-        virtual llvm::Value *extract(const std::string &name) const = 0;
-
-        virtual std::shared_ptr<const IfaceBase> clone(std::vector<V> &values) const = 0;
-    };
-    template<class T>
-    struct Iface : IfaceBase
-    {
-        Iface(T h) : handler(std::move(h)) {}
-        const std::vector<Value::V> &unpack() const override { return handler.unpack(); }
-        llvm::Value *extract(int id) const override { return handler.extract(id); }
-        llvm::Value *extract(const std::string &name) const override { return handler.extract(name); }
-        std::shared_ptr<const IfaceBase> clone(std::vector<V> &values) const override { return std::make_shared<Iface<T>>(handler.clone(values)); }
-        T handler;
-    };
-
-public:
-    Value() {}
-    template<class T>
-    Value(T handler)
-        : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
-    Value(const std::shared_ptr<const IfaceBase> &iface)
-        : m_iface(iface) {}
-
-    inline const std::vector<V> &unpack() const { return m_iface->unpack(); }
-    inline llvm::Value *extract(int id) const { return m_iface->extract(id); }
-    inline llvm::Value *extract(const std::string &name) const { return m_iface->extract(name); }
-
-    Value clone(std::vector<V> &values) const { return Value(m_iface->clone(values)); }
-
-    std::shared_ptr<const IfaceBase> m_iface;
-};
-
-Value simpleValue(llvm::Value *val, llvm::Type *t);
-inline Value simpleValue(llvm::Value *val) { return simpleValue(val, val->getType()); }
 
 class CodeGenBlock {
 public:
@@ -178,5 +129,7 @@ private:
     std::unordered_map<std::string, llvm::Function *> m_concreteTemplates;
     std::unordered_map<std::string, Value> m_globals;
 };
+
+std::string typeName(llvm::Type *ty);
 
 #endif
