@@ -110,20 +110,23 @@ static llvm::Value *pointerIntBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue
     return nullptr;
 }
 
-llvm::Value *NBinaryOperator::codeGen(CodeGenContext& context)
+Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
 {
-    auto rhsExprs = rhs->unpack(context);
-    auto lhsExprs = lhs->unpack(context);
+    auto rhsExprs = rhs->codeGen(context)->unpack();
+    auto lhsExprs = lhs->codeGen(context)->unpack();
     if (rhsExprs.size() != lhsExprs.size()) {
         err(token(), "both operands must have the same cardinality");
     }
     assert(rhsExprs.size() == 1);
     for (size_t i = 0; i < rhsExprs.size(); ++i) {
-        auto lhsValue = lhsExprs[i]->load(context);
-        auto rhsValue = rhsExprs[i]->load(context);
+        auto lhsValue = lhsExprs[i].load(context);
+        auto rhsValue = rhsExprs[i].load(context);
         auto lhst = lhsValue->getType();
         auto rhst = rhsValue->getType();
         bool sameType = lhst == rhst;
+
+        lhsExprs[i].value->dump();
+        rhsExprs[i].value->dump();
 
         llvm::Value *value = nullptr;
         if (lhst->isIntegerTy() && sameType) {
@@ -138,7 +141,7 @@ llvm::Value *NBinaryOperator::codeGen(CodeGenContext& context)
         if (!value) {
             err(token(), "invalid operands for binary expression");
         }
-        return value;
+        return simpleValue(value);
     }
-    return nullptr;
+    return {};
 }
