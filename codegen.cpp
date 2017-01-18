@@ -358,22 +358,24 @@ Optional<Value> NIdentifier::codeGen(CodeGenContext &ctx)
 {
     if (context()) {
         auto parent = context()->codeGen(ctx);
+        Value::V val;
         if (type == NIdentifier::Index) {
             try {
-                auto val = parent->extract(index);
-                return createValue(ctx, val.value, val.type);
+                val = parent->extract(index);
             } catch (OutOfRangeException &ex) {
                 err(token(), "invalid index '{}' when accessing aggregate of type '{}' with {} elements", index, ex.type, ex.size);
             }
 
         } else {
             try {
-                auto val = parent->extract(name);
-                return createValue(ctx, val.value, val.type);
+                val = parent->extract(name);
             } catch (InvalidFieldException &ex) {
                 err(token(), "struct '{}' has no field named '{}'", ex.type, name);
             }
         }
+        auto value = createValue(ctx, val.value, val.type);
+        value.setMutable(parent->isMutable() && val.mut);
+        return value;
     }
 
     auto val = ctx.local(name);
@@ -412,13 +414,13 @@ Optional<Value> NAddressOfExpression::codeGen(CodeGenContext &context)
             return RefValueH(value, values);
         }
 
-        Value::V extract(int id) const { auto v = value.extract(id); return { v.value, v.value->getType() }; }
-        Value::V extract(const std::string &name) const { auto v = value.extract(name); return { v.value, v.value->getType() }; }
+        Value::V extract(int id) const { auto v = value.extract(id); return { v.value, v.value->getType(), v.mut }; }
+        Value::V extract(const std::string &name) const { auto v = value.extract(name); return { v.value, v.value->getType(), v.mut }; }
     };
 
     std::vector<Value::V> values;
     for (auto &&v: val->unpack()) {
-        values.push_back({v.value, v.type->getPointerTo()});
+        values.push_back({v.value, v.type->getPointerTo(), true});
     }
 
     return Value(RefValueH(val, values));
@@ -511,6 +513,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 
         auto alloc = allocate(*typeIt, it->name(), argumentValue);
         auto value = createValue(*this, alloc, *typeIt);
+        value.setMutable(it->isMutable());
 
         storeLocal(it->name(), value);
     }
@@ -659,6 +662,10 @@ Optional<Value> NAssignment::codeGen(CodeGenContext &context)
     auto lhsValue = lhs->codeGen(context);
     auto rhsValue = rhs->codeGen(context);
 
+    if (!lhsValue->isMutable()) {
+        err(token(), "attempting to assign to non-mutable variable");
+    }
+
     auto lhsVec = lhsValue->unpack();
     auto rhsVec = rhsValue->unpack();
 
@@ -764,59 +771,66 @@ Optional<Value> NReturnStatement::codeGen(CodeGenContext &context)
     return simpleValue(llvm::ReturnInst::Create(context.context(), llvmval, context.currentBlock()->block));
 }
 
-static Value allocStoreVariable(CodeGenContext &ctx, const Value &value, const std::string &name)
+Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &name)
 {
-    std::vector<Value::V> values;
-    for (auto &&val: value.unpack()) {
-        auto alloc = ctx.allocate(val.type, name, val.load(ctx));
-        values.push_back({alloc, val.type});
+    if (!expression) {
+        err(token, "missing type or initializer when declaring variable '{}'", name);
+    }
+    auto init = expression->codeGen(ctx);
+
+    if (type.valid()) {
+        auto t = ctx.typeOf(type);
+        llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+        auto value = createValue(ctx, alloc, t);
+
+        new llvm::StoreInst(value.unpack()[0].value, init->unpack()[0].value, false, ctx.currentBlock()->block);
+        return value;
+    } else {
+        std::vector<Value::V> values;
+        for (auto &&val: init->unpack()) {
+            auto alloc = ctx.allocate(val.type, name, val.load(ctx));
+            values.push_back({alloc, val.type});
+        }
+
+        auto v = init->clone(values);
+        return v;
+    }
+}
+
+Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
+{
+    auto t = ctx.typeOf(type);
+    auto info = ctx.structInfo(t);
+    if (!info) {
+        error("boo");
     }
 
-    auto v = value.clone(values);
-    ctx.storeLocal(name, v);
-    return v;
+    llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+
+    if (fields.size() != info->fields.size()) {
+        err(token, "wrong number of initializers passed when declaring variable of type '{}'", name, type.name());
+    }
+
+    auto value = createValue(ctx, alloc, t);
+
+    for (auto &&f: fields) {
+        auto v = value.extract(f.name);
+        auto src = f.init->codeGen(ctx);
+
+        new llvm::StoreInst(src->unpack()[0].value, v.value, false, ctx.currentBlock()->block);
+    }
+
+    return value;
 }
 
 Optional<Value> NVariableDeclaration::codeGen(CodeGenContext &context)
 {
-    const auto numExpressions = expressions.size();
-    std::cout << "Creating variable declaration " << id.name() << '\n';
+    std::cout << "Creating variable declaration " << id.name() << " "<< id.isMutable()<< '\n';
 
-    if (!type.valid()) {
-        if (numExpressions == 0) {
-            err(token(), "missing type or initializer when declaring variable '{}'", id.name());
-        }
-
-        auto value = expressions.front()->rhs->codeGen(context);
-        return allocStoreVariable(context, value, id.name());
-    }
-
-    auto t = context.typeOf(type);
-    llvm::AllocaInst *alloc = new llvm::AllocaInst(t, id.name().c_str(), context.currentBlock()->block);
-
-    if (auto info = context.structInfo(t)) {
-        if (numExpressions != info->fields.size()) {
-            err(token(), "wrong number of initializers passed when declaring variable '{}' of type '{}'", id.name(), type.name());
-        }
-
-        auto value = createValue(context, alloc, t);
-        context.storeLocal(id.name(), value);
-
-        NIdentifier ident(token(), id.name());
-        for (size_t i = 0; i < expressions.size(); ++i) {
-            expressions[i]->lhs->pushContext(&ident);
-            expressions[i]->codeGen(context);
-        }
-        return value;
-    } else if (numExpressions == 1) {
-        auto value = createValue(context, alloc, t);
-        context.storeLocal(id.name(), value);
-        expressions.front()->codeGen(context);
-        return value;
-    } else if (numExpressions != 0) {
-        err(token(), "wrong number of initializers passed when declaring variable '{}' of type '{}'", id.name(), type.name());
-    }
-    return {};
+    auto value = init->init(context, id.name());
+    value.setMutable(id.isMutable());
+    context.storeLocal(id.name(), value);
+    return value;
 }
 
 Optional<Value> NMultiVariableDeclaration::codeGen(CodeGenContext &context)
@@ -846,9 +860,11 @@ Optional<Value> NMultiVariableDeclaration::codeGen(CodeGenContext &context)
                     vals.push_back({alloc, values[j].type});
                 }
                 value = valuePack(vals);
+                value.setMutable(name.isMutable());
             } else {
                 auto alloc = context.allocate(val->type, name.name(), val->load(context));
                 value = createValue(context, alloc, val->type);
+                value.setMutable(name.isMutable());
             }
         } else {
             std::vector<Value::V> vec;
@@ -904,7 +920,9 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
         argumentValue->setName(it->name().c_str());
 
         auto alloc = context.allocate(*typesIt, it->name(), argumentValue);
-        context.storeLocal(it->name(), createValue(context, alloc, *typesIt));
+        auto value = createValue(context, alloc, *typesIt);
+        value.setMutable(it->isMutable());
+        context.storeLocal(it->name(), value);
     }
 
     block->codeGen(context);
@@ -923,14 +941,14 @@ Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
     std::vector<llvm::Type *> argTypes;
     for (auto it = elements.begin(); it != elements.end(); it++) {
         argTypes.push_back(context.typeOf(it->type));
-        std::cout<<"    with arg " << it->type.name() << " " <<it->id.name()<<"\n";
+        std::cout<<"    with arg " << it->type.name() << " " <<it->name<<"\n";
     }
     llvm::StructType *type = llvm::StructType::create(context.context(), argTypes, id.c_str());
     auto info = context.newStructType(type);
     info->type = type;
     info->fields.reserve(elements.size());
     for (auto &&el: elements) {
-        info->fields.push_back(el.id.name());
+        info->fields.push_back({ el.name, el.mut });
     }
     return {};
 }

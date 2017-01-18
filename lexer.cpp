@@ -87,6 +87,8 @@ Token Lexer::token(const std::string &str) const
         return token(Token::Type::If);
     } else if (str == "else") {
         return token(Token::Type::Else);
+    } else if (str == "mut") {
+        return token(Token::Type::Mut);
     }
 
     return token(Token::Type::Identifier);

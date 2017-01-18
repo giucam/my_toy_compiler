@@ -166,10 +166,10 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
                 break;
             }
             case Token::Type::Equal: {
-                nextToken();
+                auto tok = nextToken();
 
                 auto rhs = parseExpression();
-                expr = std::make_unique<NAssignment>(std::move(expr), std::move(rhs));
+                expr = std::make_unique<NAssignment>(tok, std::move(expr), std::move(rhs));
                 break;
             }
             case Token::Type::LeftAngleBracket:
@@ -223,14 +223,23 @@ void Parser::parseLet()
         return;
     }
 
+    auto checkMut = [&]() {
+        if (m_lexer.peekToken().type() == Token::Type::Mut) {
+            nextToken();
+            return true;
+        }
+        return false;
+    };
+
     std::vector<NVariableName> nameToks;
     bool isMulti = false;
     if (m_lexer.peekToken().type() == Token::Type::LeftParens) {
         isMulti = true;
         nextToken();
         while (m_lexer.peekToken().type() != Token::Type::RightParens) {
+            bool mut = checkMut();
             auto tok = nextToken(Token::Type::Identifier);
-            nameToks.emplace_back(tok, tok.text());
+            nameToks.emplace_back(tok, tok.text(), mut);
 
             if (m_lexer.peekToken().type() == Token::Type::Comma) {
                 nextToken();
@@ -238,11 +247,11 @@ void Parser::parseLet()
         }
         nextToken();
     } else {
+        bool mut = checkMut();
         auto tok = nextToken(Token::Type::Identifier);
-        nameToks.emplace_back(tok, tok.text());
+        nameToks.emplace_back(tok, tok.text(), mut);
     }
 
-//     auto nameTok = nextToken(Token::Type::Identifier);
     auto &&varName = nameToks.front();
 
     NStatement *var = nullptr;
@@ -252,8 +261,7 @@ void Parser::parseLet()
         auto expr = parseExpression();
 
         if (!isMulti) {
-            auto id = std::make_unique<NIdentifier>(varName.token(), varName.name());
-            var = new NVariableDeclaration(letTok, varName, new NAssignment(std::move(id), std::move(expr)));
+            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, TypeName(), std::move(expr)));
         } else {
             var = new NMultiVariableDeclaration(letTok, nameToks, std::move(expr));
         }
@@ -262,7 +270,7 @@ void Parser::parseLet()
         checkTokenType(nextToken(), Token::Type::Equal);
 
         if (m_lexer.peekToken().type() == Token::Type::LeftBrace) {
-            AssignmentList list;
+            std::vector<NVarStructInitializer::Field> list;
 
             nextToken(); // brace
             auto tok = nextToken();
@@ -271,7 +279,7 @@ void Parser::parseLet()
                 checkTokenType(nextToken(), Token::Type::Equal);
                 auto expr = parseExpression();
 
-                list.push_back(new NAssignment(std::make_unique<NIdentifier>(tok, tok.text()), std::move(expr)));
+                list.push_back({tok.text(), std::move(expr)});
 
                 tok = nextToken();
                 if (tok.type() == Token::Type::Comma) {
@@ -281,12 +289,10 @@ void Parser::parseLet()
                 }
             }
 
-            var = new NVariableDeclaration(letTok, varName, type, list);
+            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarStructInitializer>(tok, type, list));
         } else {
             auto expr = parseExpression();
-
-            auto id = std::make_unique<NIdentifier>(varName.token(), varName.name());
-            var = new NVariableDeclaration(letTok, varName, type, new NAssignment(std::move(id), std::move(expr)));
+            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, type, std::move(expr)));
         }
     } else {
         err(tok, "':' or '=' expected");
@@ -305,17 +311,22 @@ void Parser::parseStruct()
     auto nameTok = nextToken(Token::Type::Identifier);
     checkTokenType(nextToken(), Token::Type::LeftBrace);
 
-    std::vector<NVariableDeclaration> list;
+    std::vector<NStructDeclaration::Field> list;
 
     auto tok = nextToken();
     while (tok.type() != Token::Type::RightBrace) {
+        bool mut = false;
+        if (tok.type() == Token::Type::Mut) {
+            mut = true;
+            tok = nextToken();
+        }
 
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
         auto type = parseType();
         checkTokenType(nextToken(), Token::Type::Semicolon);
 
-        list.push_back(NVariableDeclaration(tok, NVariableName(tok, tok.text()), type));
+        list.push_back({ tok.text(),  type, mut });
 
         tok = nextToken();
     }
@@ -523,7 +534,7 @@ void Parser::parseExtern()
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
 
-        list.emplace_back(tok, tok.text(), parseType());
+        list.emplace_back(tok, tok.text(), parseType(), true);
 
         tok = nextToken();
         if (tok.type() == Token::Type::Comma) {
@@ -584,10 +595,16 @@ NFunctionDeclaration *Parser::parseFunc()
             break;
         }
 
+        bool mut = false;
+        if (tok.type() == Token::Type::Mut) {
+            mut = true;
+            tok = nextToken();
+        }
+
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
 
-        list.emplace_back(tok, tok.text(), parseType());
+        list.emplace_back(tok, tok.text(), parseType(), mut);
 
         tok = nextToken();
         if (tok.type() == Token::Type::Comma) {

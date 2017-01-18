@@ -169,8 +169,8 @@ class NAssignment : public NExpression {
 public:
     std::unique_ptr<NExpression> lhs;
     std::unique_ptr<NExpression> rhs;
-    NAssignment(std::unique_ptr<NExpression> lhs, std::unique_ptr<NExpression> rhs)
-        : NExpression(), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
+    NAssignment(const Token &tok, std::unique_ptr<NExpression> lhs, std::unique_ptr<NExpression> rhs)
+        : NExpression(tok), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
@@ -220,24 +220,57 @@ private:
 class NVariableName
 {
 public:
-    NVariableName(const Token &tok, const std::string &name) : m_token(tok), m_name(name) {}
+    NVariableName(const Token &tok, const std::string &name, bool mut) : m_token(tok), m_name(name), m_mut(mut) {}
 
     const std::string &name() const { return m_name; }
     const Token &token() const { return m_token; }
+    bool isMutable() const { return m_mut; }
 private:
     Token m_token;
     std::string m_name;
+    bool m_mut;
+};
+
+class NVariableInitializer
+{
+public:
+    virtual Value init(CodeGenContext &ctx, const std::string &name) = 0;
+};
+
+class NVarExpressionInitializer : public NVariableInitializer
+{
+public:
+    NVarExpressionInitializer(const Token &tok, const TypeName &type, std::unique_ptr<NExpression> expr) : token(tok), type(type), expression(std::move(expr)) {}
+
+    Value init(CodeGenContext &ctx, const std::string &name) override;
+
+    Token token;
+    TypeName type;
+    std::unique_ptr<NExpression> expression;
+};
+
+class NVarStructInitializer : public NVariableInitializer
+{
+public:
+    struct Field
+    {
+        std::string name;
+        std::unique_ptr<NExpression> init;
+    };
+    Token token;
+    TypeName type;
+    std::vector<Field> fields;
+
+    NVarStructInitializer(const Token &tok, const TypeName &type, std::vector<Field> &f) : token(tok), type(type) { std::swap(fields, f); }
+
+    Value init(CodeGenContext &ctx, const std::string &name) override;
 };
 
 class NVariableDeclaration : public NStatement {
 public:
-    TypeName type;
     NVariableName id;
-    AssignmentList expressions;
-    NVariableDeclaration(const Token &tok, const NVariableName &name, const TypeName &type) : NStatement(tok), type(type), id(name) { }
-    NVariableDeclaration(const Token &tok, const NVariableName &name, const TypeName &type, NAssignment *assignmentExpr) : NStatement(tok), type(type), id(name), expressions({ assignmentExpr }) { }
-    NVariableDeclaration(const Token &tok, const NVariableName &name, const TypeName &type, AssignmentList exprs) : NStatement(tok), type(type), id(name), expressions(exprs) { }
-    NVariableDeclaration(const Token &tok, const NVariableName &name, NAssignment *expr) : NStatement(tok), id(name), expressions({ expr }) {}
+    std::unique_ptr<NVariableInitializer> init;
+    NVariableDeclaration(const Token &tok, const NVariableName &name, std::unique_ptr<NVariableInitializer> init) : NStatement(tok), id(name), init(std::move(init)) { }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
@@ -259,16 +292,18 @@ private:
 class NFunctionArgumentDeclaration
 {
 public:
-    NFunctionArgumentDeclaration(const Token &tok, const std::string &name, const TypeName &type) : m_token(tok), m_name(name), m_type(type) {}
+    NFunctionArgumentDeclaration(const Token &tok, const std::string &name, const TypeName &type, bool mut) : m_token(tok), m_name(name), m_type(type), m_mut(mut) {}
 
     const Token &token() const { return m_token; }
     const std::string &name() const { return m_name; }
     const TypeName &type() const { return m_type; }
+    bool isMutable() const { return m_mut; }
 
 private:
     Token m_token;
     std::string m_name;
     TypeName m_type;
+    bool m_mut;
 };
 
 class NExternDeclaration : public NStatement {
@@ -319,9 +354,16 @@ public:
 
 class NStructDeclaration : public NStatement {
 public:
+    struct Field
+    {
+        std::string name;
+        TypeName type;
+        bool mut;
+    };
+
     std::string id;
-    std::vector<NVariableDeclaration> elements;
-    NStructDeclaration(const std::string &id, const std::vector<NVariableDeclaration> &elements) : id(id), elements(elements) {}
+    std::vector<Field> elements;
+    NStructDeclaration(const std::string &id, const std::vector<Field> &elements) : id(id), elements(elements) {}
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };

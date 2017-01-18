@@ -59,7 +59,11 @@ public:
 
 struct StructInfo {
     llvm::Type *type;
-    std::vector<std::string> fields;
+    struct FieldInfo {
+        std::string name;
+        bool mut;
+    };
+    std::vector<FieldInfo> fields;
 };
 
 struct TupleInfo {

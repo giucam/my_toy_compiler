@@ -17,6 +17,7 @@ public:
         Func,
         Struct,
         Let,
+        Mut,
         Iface,
         Impl,
         Identifier,
@@ -77,6 +78,7 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(Func, "'func'")
         TOKSTR(Struct, "'struct'")
         TOKSTR(Let, "'let'")
+        TOKSTR(Mut, "'mut'")
         TOKSTR(Iface, "'iface'")
         TOKSTR(Impl, "'impl'")
         TOK(Identifier)

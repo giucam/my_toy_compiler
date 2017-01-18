@@ -36,6 +36,7 @@ public:
     struct V {
         llvm::Value *value;
         llvm::Type *type;
+        bool mut;
 
         llvm::Value *load(CodeGenContext &ctx) const;
     };
@@ -63,12 +64,18 @@ private:
     };
 
 public:
+    enum class Flags
+    {
+        None = 0,
+        Mutable = 1,
+    };
+
     Value() {}
     template<class T>
-    Value(T handler)
-        : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
-    Value(const std::shared_ptr<const IfaceBase> &iface)
-        : m_iface(iface) {}
+    Value(T handler, Flags flags = Flags::None)
+        : m_iface(std::make_shared<Iface<T>>(std::move(handler))), m_flags((int)flags) {}
+    Value(const std::shared_ptr<const IfaceBase> &iface, Flags flags = Flags::None)
+        : m_iface(iface), m_flags((int)flags) {}
 
     inline const std::vector<V> &unpack() const { return m_iface->unpack(); }
     inline Value::V extract(int id) const { return m_iface->extract(id); }
@@ -76,7 +83,12 @@ public:
 
     Value clone(std::vector<V> &values) const { return Value(m_iface->clone(values)); }
 
+    void setMutable(bool m);
+    bool isMutable() const { return m_flags & (int)Flags::Mutable; }
+
+private:
     std::shared_ptr<const IfaceBase> m_iface;
+    int m_flags;
 };
 
 Value simpleValue(llvm::Value *val, llvm::Type *t = nullptr);

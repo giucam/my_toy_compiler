@@ -1,6 +1,7 @@
 
 #include "value.h"
 #include "codegen.h"
+#include "common.h"
 
 Value simpleValue(llvm::Value *val, llvm::Type *t)
 {
@@ -10,7 +11,7 @@ Value simpleValue(llvm::Value *val, llvm::Type *t)
 
     struct SimpleValH
     {
-        SimpleValH(llvm::Value *val, llvm::Type *t) : values({{val, t }}) {}
+        SimpleValH(llvm::Value *val, llvm::Type *t) : values({{ val, t, true }}) {}
 
         const std::vector<Value::V> &unpack() const
         {
@@ -85,7 +86,7 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
     struct StructValueH
     {
         StructValueH(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
-            : value({{alloc, type}}), info(i), ctx(c)
+            : value({{alloc, type, true}}), info(i), ctx(c)
         {
         }
 
@@ -109,13 +110,14 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
 
             auto st = static_cast<llvm::StructType *>(info->type);
 
-            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), st->elements()[id] };
+            bool mut = info->fields[id].mut;
+            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), st->elements()[id], mut };
         }
         Value::V extract(const std::string &name) const
         {
             int id = -1;
             for (size_t i = 0; i < info->fields.size(); ++i) {
-                if (info->fields[i] == name) {
+                if (info->fields[i].name == name) {
                     id = i;
                     break;
                 }
@@ -143,7 +145,7 @@ Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeG
     struct TupleValueH
     {
         TupleValueH(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
-            : value({{alloc, type}}), info(i), ctx(c)
+            : value({{alloc, type, true}}), info(i), ctx(c)
         {
         }
 
@@ -198,4 +200,13 @@ Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeG
 llvm::Value *Value::V::load(CodeGenContext &ctx) const
 {
     return ctx.convertTo(value, type);
+}
+
+void Value::setMutable(bool m)
+{
+    if (m) {
+        m_flags = m_flags | m;
+    } else {
+        m_flags = m_flags & ~m;
+    }
 }

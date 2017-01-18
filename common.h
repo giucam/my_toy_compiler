@@ -5,6 +5,8 @@
 #include "fmt/format.h"
 #include "fmt/ostream.h"
 
+#include "lexer.h"
+
 template<class... Args>
 static void error(Args &&... args)
 {
