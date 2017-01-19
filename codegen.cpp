@@ -1,14 +1,14 @@
 #include <fstream>
 
-#include "llvm/Support/raw_os_ostream.h"
+#include <llvm/Support/raw_os_ostream.h>
 
 #include "node.h"
 #include "codegen.h"
 // #include "parser.hpp"
 #include "common.h"
 
-CodeGenContext::CodeGenContext()
-              : m_module(std::make_unique<llvm::Module>("main", m_context))
+CodeGenContext::CodeGenContext(const std::string &name)
+              : m_module(std::make_unique<llvm::Module>(name.c_str(), m_context))
 {
 }
 

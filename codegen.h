@@ -72,7 +72,7 @@ struct TupleInfo {
 
 class CodeGenContext {
 public:
-    CodeGenContext();
+    CodeGenContext(const std::string &name);
 
     bool isFunctionNameAvailable(const std::string &name) const;
 

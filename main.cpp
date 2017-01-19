@@ -1,12 +1,42 @@
 #include <iostream>
 #include <unistd.h>
 
+#include <llvm/Support/TargetRegistry.h>
+
 #include "codegen.h"
 #include "node.h"
 #include "parser.h"
 #include "common.h"
 
 using namespace std;
+
+struct Target
+{
+    std::string triple;
+    llvm::DataLayout dataLayout;
+};
+
+static Target initLLVMTarget()
+{
+    llvm::InitializeNativeTarget();
+
+    auto triple = llvm::sys::getDefaultTargetTriple();
+    std::string errorMsg;
+    auto target = llvm::TargetRegistry::lookupTarget(triple, errorMsg);
+    if (!target) {
+        error("{}", errorMsg);
+    }
+
+    auto cpu = "generic";
+    auto features = "";
+
+    llvm::TargetOptions opt;
+    auto rm = llvm::Optional<llvm::Reloc::Model>();
+    auto targetMachine = target->createTargetMachine(triple, cpu, features, opt, rm);
+    auto datalayout = targetMachine->createDataLayout();
+
+    return { triple, datalayout };
+}
 
 static void usage()
 {
@@ -48,6 +78,12 @@ int main(int argc, char **argv)
         inputfiles.push_back(argv[i]);
     }
 
+    if (inputfiles.empty()) {
+        usage();
+    }
+
+    auto target = initLLVMTarget();
+
     for (auto &&file: inputfiles) {
         NBlock programBlock;
 
@@ -58,11 +94,9 @@ int main(int argc, char **argv)
         Parser parser(file);
         parser.parse(&programBlock, false);
 
-        llvm::InitializeNativeTarget();
-    //     InitializeNativeTargetAsmPrinter();
-    //     InitializeNativeTargetAsmParser();
-
-        CodeGenContext context;
+        CodeGenContext context(file);
+        context.module().setTargetTriple(target.triple);
+        context.module().setDataLayout(target.dataLayout);
         context.generateCode(programBlock);
 
         file += ".ll";
