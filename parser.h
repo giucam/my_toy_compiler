@@ -14,7 +14,7 @@ class Parser
 public:
     Parser(const std::string &filename);
 
-    void parse(NBlock *rootBlock);
+    void parse(NBlock *rootBlock, bool declarationsOnly);
 
 private:
     Token nextToken(Token::Type expected);
@@ -37,10 +37,12 @@ private:
     TypeName parseType();
     void parseIf();
     void parseWhile();
+    void parseImport();
 
     std::string m_filename;
     Lexer m_lexer;
     NBlock *m_block;
+    bool m_declarationsOnly;
 };
 
 #endif

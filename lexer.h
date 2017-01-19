@@ -50,6 +50,7 @@ public:
         RightAngleBracket,
         True,
         False,
+        Import,
     };
     Token() : m_lineno(0), m_columnno(0) {}
     Token(Type t, int l, int c, const std::string &filename, const std::string &txt, const std::string &line): m_type(t), m_lineno(l), m_columnno(c), m_filename(filename), m_line(line), m_text(txt) {}
@@ -114,6 +115,7 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(RightAngleBracket, "'>'")
         TOKSTR(True, "'true'")
         TOKSTR(False, "'false'")
+        TOKSTR(Import, "'import'")
     }
 #undef TOK
     return s;
@@ -133,7 +135,7 @@ private:
     int nextChar();
     int peekChar();
     void nextLine();
-    inline Token token(Token::Type type) const { return Token(type, m_lineno, m_colno > 0 ? m_colno - 1 : m_line.size(), m_filename, m_text, m_line); }
+    Token token(Token::Type type) const { return Token(type, m_lineno, m_colno > 0 ? m_colno - 1 : m_line.size(), m_filename, m_text, m_line); }
     Token token(const std::string &str) const;
 
     std::string m_filename;

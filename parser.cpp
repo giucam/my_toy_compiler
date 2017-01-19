@@ -456,6 +456,16 @@ void Parser::parseWhile()
     m_block->statements.push_back(stmt);
 }
 
+void Parser::parseImport()
+{
+    nextToken(Token::Type::Import);
+
+    auto tok = nextToken(Token::Type::StringLiteral);
+
+    Parser child(tok.text());
+    child.parse(m_block, true);
+}
+
 void Parser::parseStatements()
 {
     fmt::print("block\n");
@@ -495,6 +505,9 @@ void Parser::parseStatements()
             break;
         case Token::Type::While:
             parseWhile();
+            break;
+        case Token::Type::Import:
+            parseImport();
             break;
         case Token::Type::RightBrace:
             fmt::print("br\n");
@@ -613,6 +626,7 @@ NFunctionDeclaration *Parser::parseFunc()
 
     std::vector<NFunctionArgumentDeclaration> list;
     auto tok = nextToken();
+    bool isTemplate = false;
     while (true) {
         if (tok.type() == Token::Type::RightParens) {
             break;
@@ -627,7 +641,12 @@ NFunctionDeclaration *Parser::parseFunc()
         checkTokenType(tok, Token::Type::Identifier);
         checkTokenType(nextToken(), Token::Type::Colon);
 
-        list.emplace_back(tok, tok.text(), parseType(), mut);
+        auto type = parseType();
+        list.emplace_back(tok, tok.text(), type, mut);
+
+        if (type.name() == "(...)") {
+            isTemplate = true;
+        }
 
         tok = nextToken();
         if (tok.type() == Token::Type::Comma) {
@@ -639,14 +658,18 @@ NFunctionDeclaration *Parser::parseFunc()
     auto retType = parseType();
 
     auto block = parseBlock();
-
+    if (m_declarationsOnly && !isTemplate) {
+        delete block;
+        block = nullptr;
+    }
 
     auto decl = new NFunctionDeclaration(nameTok.text(), retType, list, block);
     return decl;
 }
 
-void Parser::parse(NBlock *root)
+void Parser::parse(NBlock *root, bool declarationsOnly)
 {
+    m_declarationsOnly = declarationsOnly;
     m_block = root;
     parseStatements();
 }

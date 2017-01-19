@@ -912,28 +912,30 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
     auto retType = context.typeOf(type);
     llvm::FunctionType *ftype = llvm::FunctionType::get(retType, llvm::makeArrayRef(argTypes), false);
     llvm::Function *function = llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, id.c_str(), &context.module());
-    llvm::BasicBlock *bblock = llvm::BasicBlock::Create(context.context(), "entry", function, 0);
+    if (block) {
+        llvm::BasicBlock *bblock = llvm::BasicBlock::Create(context.context(), "entry", function, 0);
 
-    context.pushBlock(bblock, function, nullptr);
+        context.pushBlock(bblock, function, nullptr);
 
-    llvm::Function::arg_iterator argsValues = function->arg_begin();
-    auto typesIt = argTypes.begin();
-    for (auto it = arguments.begin(); it != arguments.end(); it++, typesIt++) {
-        auto argumentValue = &*argsValues++;
-        argumentValue->setName(it->name().c_str());
+        llvm::Function::arg_iterator argsValues = function->arg_begin();
+        auto typesIt = argTypes.begin();
+        for (auto it = arguments.begin(); it != arguments.end(); it++, typesIt++) {
+            auto argumentValue = &*argsValues++;
+            argumentValue->setName(it->name().c_str());
 
-        auto alloc = context.allocate(*typesIt, it->name(), argumentValue);
-        auto value = createValue(context, alloc, *typesIt);
-        value.setMutable(it->isMutable());
-        context.storeLocal(it->name(), value);
+            auto alloc = context.allocate(*typesIt, it->name(), argumentValue);
+            auto value = createValue(context, alloc, *typesIt);
+            value.setMutable(it->isMutable());
+            context.storeLocal(it->name(), value);
+        }
+
+        block->codeGen(context);
+        if (!context.currentBlock()->returned) {
+            llvm::ReturnInst::Create(context.context(), nullptr, context.currentBlock()->block);
+        }
+
+        context.popBlock();
     }
-
-    block->codeGen(context);
-    if (!context.currentBlock()->returned) {
-        llvm::ReturnInst::Create(context.context(), nullptr, context.currentBlock()->block);
-    }
-
-    context.popBlock();
     std::cout << "Creating function: " << id << '\n';
     return {};
 }

@@ -36,6 +36,7 @@ int Lexer::nextChar()
         while (!m_stream.eof()) {
             int c = m_stream.get();
             if (c == '\n') {
+                m_line += ' ';
                 break;
             }
             m_line += c;
@@ -95,6 +96,8 @@ Token Lexer::token(const std::string &str) const
         return token(Token::Type::True);
     } else if (str == "false") {
         return token(Token::Type::False);
+    } else if (str == "import") {
+        return token(Token::Type::Import);
     }
 
     return token(Token::Type::Identifier);
@@ -168,6 +171,7 @@ Token Lexer::readNextToken()
                 }
             }
             m_text = str;
+            fmt::print("literal {}\n",str);
             return token(Token::Type::StringLiteral);
         } else if (m_lastChar == '\'') {
             std::string str;

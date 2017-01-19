@@ -1,0 +1,60 @@
+
+func extern printf(format: string, ...): i32;
+func extern fwrite(ptr: *i8, size: u32, nmemb: u32, stream: *i8): u32;
+func extern strchr(str: *i8, c: i32): *i8;
+func extern strlen(str: *i8): u32;
+let extern stdout: *i8;
+
+iface printable(A) {
+    func printValue(A);
+}
+
+impl printable(i32) {
+    func printValue(value: i32): void {
+        printf("%d", value);
+    }
+}
+
+impl printable(f64) {
+    func printValue(value: f64): void {
+        printf("%f", value);
+    }
+}
+
+impl printable(string) {
+    func printValue(val: string): void {
+        fwrite(val, 1, strlen(val), stdout);
+    }
+}
+
+impl printable(i8) {
+    func printValue(val: i8): void {
+        printf("%d", val);
+    }
+}
+
+impl printable(()) {
+    func printValue(): void {
+    }
+}
+
+func print(format: string, values: (...)): void
+{
+    let ptr = strchr(format, '{');
+    if (ptr) {
+        let len = ptr - format;
+
+        fwrite(format, 1, len, stdout);
+
+        let (arg, rest) = values;
+        printValue(arg);
+
+        if (strlen(ptr) < 3) {
+            return;
+        }
+
+        print(ptr + 2, rest);
+    } else {
+        fwrite(format, 1, strlen(format), stdout);
+    }
+}

@@ -27,5 +27,5 @@ llvm_map_components_to_libnames(llvm_libs mcjit native)
 add_executable(parser ${SOURCES})
 target_link_libraries(parser ${llvm_libs})
 
-add_custom_target(run ./parser example.txt example.ll COMMAND echo "Running..." COMMAND lli example.ll DEPENDS parser)
-add_custom_target(build ./parser example.txt example.ll COMMAND clang example.ll -o example DEPENDS parser)
+add_custom_target(build ./parser -o example example.txt print.lang  DEPENDS parser)
+add_custom_target(run echo "Running..." COMMAND ./example DEPENDS build)
