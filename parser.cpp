@@ -5,6 +5,7 @@
 #include "lexer.h"
 #include "common.h"
 #include "node.h"
+#include "cparser.h"
 
 Parser::Parser(const std::string &filename)
       : m_filename(filename)
@@ -337,7 +338,8 @@ void Parser::parseStruct()
         tok = nextToken();
     }
 
-    auto decl = new NStructDeclaration(nameTok.text(), list);
+    auto decl = new NStructDeclaration(nameTok.text());
+    decl->setFields(list);
     m_block->statements.push_back(decl);
 }
 
@@ -461,9 +463,20 @@ void Parser::parseImport()
     nextToken(Token::Type::Import);
 
     auto tok = nextToken(Token::Type::StringLiteral);
+    if (m_lexer.peekToken().type() == Token::Type::Semicolon) {
+        Parser child(tok.text());
+        child.parse(m_block, true);
+    } else {
+        auto fileTok = nextToken(Token::Type::StringLiteral);
 
-    Parser child(tok.text());
-    child.parse(m_block, true);
+        if (tok.text() == "C") {
+            CParser child(fileTok.text());
+            child.parse(m_block);
+        } else {
+            err(tok, "unknown language '{}'", tok.text());
+        }
+    }
+    nextToken(Token::Type::Semicolon);
 }
 
 void Parser::parseStatements()

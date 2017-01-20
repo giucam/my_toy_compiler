@@ -87,10 +87,6 @@ int main(int argc, char **argv)
     for (auto &&file: inputfiles) {
         NBlock programBlock;
 
-        if (access(file.c_str(), F_OK) != 0) {
-            error("cannot open file '{}' for reading", file);
-        }
-
         Parser parser(file);
         parser.parse(&programBlock, false);
 

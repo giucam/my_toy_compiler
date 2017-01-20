@@ -1,9 +1,6 @@
 
-func extern printf(format: string, ...): i32;
-func extern fwrite(ptr: *i8, size: u32, nmemb: u32, stream: *i8): u32;
-func extern strchr(str: *i8, c: i32): *i8;
-func extern strlen(str: *i8): u32;
-let extern stdout: *i8;
+import "C" "stdio.h";
+import "C" "string.h";
 
 iface printable(A) {
     func printValue(A);

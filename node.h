@@ -40,6 +40,57 @@ private:
     Token m_token;
 };
 
+class Type
+{
+    struct IfaceBase {
+        virtual ~IfaceBase() {}
+        virtual llvm::Type *get(CodeGenContext &ctx) const = 0;
+        virtual bool isVarArg() const = 0;
+    };
+    template <class T>
+    struct Iface : IfaceBase {
+        Iface(T d) : data(std::move(d)) {}
+        llvm::Type *get(CodeGenContext &ctx) const override { return data.get(ctx); }
+        bool isVarArg() const override { return data.isVarArg(); }
+        T data;
+    };
+
+public:
+    template <class T>
+    Type(T handler)
+        : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
+
+    inline llvm::Type *get(CodeGenContext &ctx) const { return m_iface->get(ctx); }
+    inline bool isVarArg() const { return m_iface->isVarArg(); }
+
+    Type getPointerTo();
+
+private:
+    std::shared_ptr<const IfaceBase> m_iface;
+};
+
+class IntegerType
+{
+public:
+    IntegerType(bool sign, int bits) : m_signed(sign), m_bits(bits) {}
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    bool isVarArg() const;
+
+private:
+    bool m_signed;
+    int m_bits;
+};
+
+class VoidType
+{
+public:
+    VoidType() {}
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    bool isVarArg() const;
+};
+
 class TypeName
 {
 public:
@@ -50,10 +101,52 @@ public:
     bool valid() const { return !m_name.empty(); }
     const std::string &name() const { return m_name; }
     int pointer() const { return m_pointer; }
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    bool isVarArg() const;
+
 private:
     Token m_token;
     std::string m_name;
     int m_pointer;
+};
+
+class PointerType
+{
+public:
+    PointerType(Type t) : m_type(t) {}
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    bool isVarArg() const;
+
+private:
+    Type m_type;
+};
+
+class FunctionPointerType
+{
+public:
+    FunctionPointerType(Type ret, std::vector<Type> &args) : m_ret(ret) { std::swap(args, m_args); }
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    bool isVarArg() const;
+
+private:
+    Type m_ret;
+    std::vector<Type> m_args;
+};
+
+class ArrayType
+{
+public:
+    ArrayType(Type t, int n) : m_type(t), m_num(n) {}
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    bool isVarArg() const;
+
+private:
+    Type m_type;
+    int m_num;
 };
 
 class NExpression : public Node
@@ -299,34 +392,34 @@ private:
 class NFunctionArgumentDeclaration
 {
 public:
-    NFunctionArgumentDeclaration(const Token &tok, const std::string &name, const TypeName &type, bool mut) : m_token(tok), m_name(name), m_type(type), m_mut(mut) {}
+    NFunctionArgumentDeclaration(const Token &tok, const std::string &name, Type type, bool mut) : m_token(tok), m_name(name), m_type(type), m_mut(mut) {}
 
     const Token &token() const { return m_token; }
     const std::string &name() const { return m_name; }
-    const TypeName &type() const { return m_type; }
+    Type type() const { return m_type; }
     bool isMutable() const { return m_mut; }
 
 private:
     Token m_token;
     std::string m_name;
-    TypeName m_type;
+    Type m_type;
     bool m_mut;
 };
 
 class NExternDeclaration : public NStatement {
 public:
-    NExternDeclaration(const std::string &id, const TypeName &type, std::vector<NFunctionArgumentDeclaration> &arguments, bool varargs)
+    NExternDeclaration(const std::string &id, Type type, std::vector<NFunctionArgumentDeclaration> &arguments, bool varargs)
         : m_type(type), m_name(id), m_varargs(varargs) { std::swap(m_arguments, arguments); }
 
     const std::string &name() const { return m_name; }
-    const TypeName &returnType() const { return m_type; }
+    Type returnType() const { return m_type; }
     const std::vector<NFunctionArgumentDeclaration> &arguments() const { return m_arguments; }
     bool isVarargs() const { return m_varargs; }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
 private:
-    TypeName m_type;
+    Type m_type;
     std::string m_name;
     std::vector<NFunctionArgumentDeclaration> m_arguments;
     bool m_varargs;
@@ -334,16 +427,16 @@ private:
 
 class NExternVariableDeclaration : public NStatement {
 public:
-    NExternVariableDeclaration(const Token &tok, const std::string &name, const TypeName &type) : NStatement(tok), m_name(name), m_type(type) {}
+    NExternVariableDeclaration(const Token &tok, const std::string &name, Type type) : NStatement(tok), m_name(name), m_type(type) {}
 
     const std::string &name() const { return m_name; }
-    const TypeName &type() const { return m_type; }
+    Type type() const { return m_type; }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
 private:
     std::string m_name;
-    TypeName m_type;
+    Type m_type;
 };
 
 class NFunctionDeclaration : public NStatement {
@@ -359,18 +452,43 @@ public:
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
-class NStructDeclaration : public NStatement {
+class NStructDeclaration : public NStatement
+{
 public:
     struct Field
     {
         std::string name;
-        TypeName type;
+        Type type;
         bool mut;
     };
 
     std::string id;
     std::vector<Field> elements;
-    NStructDeclaration(const std::string &id, const std::vector<Field> &elements) : id(id), elements(elements) {}
+    Type m_type;
+    NStructDeclaration(const std::string &id);
+
+    const Type &type() const { return m_type; }
+    void setFields(std::vector<Field> &e) { std::swap(e, elements); }
+
+    Optional<Value> codeGen(CodeGenContext &context) override;
+};
+
+class NUnionDeclaration : public NStatement
+{
+public:
+    struct Field
+    {
+        std::string name;
+        Type type;
+        bool mut;
+    };
+
+    std::string id;
+    std::vector<Field> elements;
+    Type m_type;
+    NUnionDeclaration(const std::string &id, std::vector<Field> &e);
+
+    const Type &type() const { return m_type; }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };

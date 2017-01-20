@@ -1,5 +1,5 @@
 
-import "print.lang"
+import "print.lang";
 
 // iface math(A, B) {
 //     func do_math(A, B);

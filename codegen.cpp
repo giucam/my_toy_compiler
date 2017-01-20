@@ -465,7 +465,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 
     for (auto it = func->arguments.begin(); it != func->arguments.end(); ++it, ++valueIt) {
         llvm::Type *valueType = nullptr;
-        if (it->type().name() == "(...)") {
+        if (it->type().isVarArg()) {
             for (auto it = valueIt; it < values.end(); ++it) {
                 auto ty = it->type;
                 if (ty->isStructTy()) {
@@ -497,7 +497,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 
     auto typeIt = argTypes.begin();
     for (auto it = func->arguments.begin(); it != func->arguments.end(); ++it, ++typeIt) {
-        if (it->type().name() == "(...)") {
+        if (it->type().isVarArg()) {
             std::vector<Value::V> values;
             for (; typeIt != argTypes.end(); ++typeIt) {
                 auto argumentValue = &*argsValues++;
@@ -887,9 +887,9 @@ Optional<Value> NExternDeclaration::codeGen(CodeGenContext &context)
     std::vector<llvm::Type *> argTypes;
     argTypes.reserve(arguments().size());
     for (auto &&arg: arguments()) {
-        argTypes.push_back(context.typeOf(arg.type()));
+        argTypes.push_back(arg.type().get(context));
     }
-    llvm::FunctionType *ftype = llvm::FunctionType::get(context.typeOf(returnType()), llvm::makeArrayRef(argTypes), isVarargs());
+    llvm::FunctionType *ftype = llvm::FunctionType::get(returnType().get(context), llvm::makeArrayRef(argTypes), isVarargs());
     llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, name().c_str(), &context.module());
 
     return {};
@@ -903,11 +903,11 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
 
     std::vector<llvm::Type *> argTypes;
     for (auto it = arguments.begin(); it != arguments.end(); it++) {
-        if (it->type().name() == "(...)") {
+        if (it->type().isVarArg()) {
             context.addFunctionTemplate(this);
             return {};
         }
-        argTypes.push_back(context.typeOf(it->type()));
+        argTypes.push_back(it->type().get(context));
     }
     auto retType = context.typeOf(type);
     llvm::FunctionType *ftype = llvm::FunctionType::get(retType, llvm::makeArrayRef(argTypes), false);
@@ -940,15 +940,75 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
     return {};
 }
 
+class StructType
+{
+public:
+    StructType(const std::string &n) : name(n), type(nullptr) {}
+
+    llvm::Type *get(CodeGenContext &context) const
+    {
+        if (!type) {
+            type = llvm::StructType::create(context.context(), name.c_str());
+        }
+        return type;
+    }
+    bool isVarArg() const { return false; }
+
+    std::string name;
+    mutable llvm::Type *type;
+};
+
+NStructDeclaration::NStructDeclaration(const std::string &id)
+                  : id(id)
+                  , m_type(StructType(id))
+{
+}
+
 Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
+{
+    auto type = static_cast<llvm::StructType *>(m_type.get(context));
+    if (!type->isOpaque()) {
+        return {};
+    }
+
+    std::cout << "Creating struct declaration " << " " << id << " "<<this<<'\n';
+
+    std::vector<llvm::Type *> argTypes;
+    for (auto it = elements.begin(); it != elements.end(); it++) {
+        auto t = it->type;
+        argTypes.push_back(t.get(context));
+//         std::cout<<"    with arg " << it->type->name() << " " <<it->name<<"\n";
+    }
+    type->setBody(argTypes);
+
+    auto info = context.newStructType(type);
+    info->type = type;
+    info->fields.reserve(elements.size());
+    for (auto &&el: elements) {
+        info->fields.push_back({ el.name, el.mut });
+    }
+    return {};
+}
+
+NUnionDeclaration::NUnionDeclaration(const std::string &id, std::vector<Field> &e)
+                 : id(id)
+                 , m_type(StructType(id))
+{
+    std::swap(e, elements);
+}
+
+Optional<Value> NUnionDeclaration::codeGen(CodeGenContext &context)
 {
     std::cout << "Creating struct declaration " << " " << id << '\n';
     std::vector<llvm::Type *> argTypes;
     for (auto it = elements.begin(); it != elements.end(); it++) {
-        argTypes.push_back(context.typeOf(it->type));
-        std::cout<<"    with arg " << it->type.name() << " " <<it->name<<"\n";
+        argTypes.push_back(it->type.get(context));
+        break;
+//         std::cout<<"    with arg " << it->type->name() << " " <<it->name<<"\n";
     }
-    llvm::StructType *type = llvm::StructType::create(context.context(), argTypes, id.c_str());
+
+    auto type = static_cast<llvm::StructType *>(m_type.get(context));
+    type->setBody(argTypes);
     auto info = context.newStructType(type);
     info->type = type;
     info->fields.reserve(elements.size());
@@ -1087,9 +1147,66 @@ Optional<Value> NWhileStatement::codeGen(CodeGenContext &ctx)
 
 Optional<Value> NExternVariableDeclaration::codeGen(CodeGenContext &ctx)
 {
-    auto ty = ctx.typeOf(type());
+    auto ty = type().get(ctx);
     auto val = new llvm::GlobalVariable(ctx.module(), ty, false, llvm::GlobalValue::ExternalLinkage, nullptr, name().c_str());
     auto value = simpleValue(val);
     ctx.storeGlobal(name(), value);
     return value;
 }
+
+Type Type::getPointerTo()
+{
+    return PointerType(*this);
+}
+
+llvm::Type *VoidType::get(CodeGenContext &ctx) const
+{
+    return llvm::Type::getVoidTy(ctx.context());
+}
+
+bool VoidType::isVarArg() const { return false; }
+
+llvm::Type *IntegerType::get(CodeGenContext &ctx) const
+{
+    return llvm::IntegerType::get(ctx.context(), m_bits);
+}
+
+bool IntegerType::isVarArg() const { return false; }
+
+
+llvm::Type *PointerType::get(CodeGenContext &ctx) const
+{
+    return m_type.get(ctx)->getPointerTo();
+}
+
+bool PointerType::isVarArg() const { return false; }
+
+llvm::Type *TypeName::get(CodeGenContext &ctx) const
+{
+    return ctx.typeOf(*this);
+}
+
+bool TypeName::isVarArg() const
+{
+    return name() == "(...)";
+}
+
+llvm::Type *FunctionPointerType::get(CodeGenContext &ctx) const
+{
+    std::vector<llvm::Type *> argTypes;
+    for (auto &&a: m_args) {
+        argTypes.push_back(a.get(ctx));
+    }
+    auto retType = m_ret.get(ctx);
+    return llvm::FunctionType::get(retType, llvm::makeArrayRef(argTypes), false);
+}
+
+bool FunctionPointerType::isVarArg() const { return false; }
+
+llvm::Type *ArrayType::get(CodeGenContext &ctx) const
+{
+    auto t = m_type.get(ctx);
+    return llvm::ArrayType::get(t, m_num);
+}
+
+bool ArrayType::isVarArg() const { return false; }
