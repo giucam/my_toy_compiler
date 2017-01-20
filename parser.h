@@ -31,10 +31,10 @@ private:
     void parseLet();
     void parseStruct();
     void parseIface();
-    std::vector<TypeName> parseParameterList();
+    std::vector<Type> parseParameterList();
     void parseImpl();
     void parseExpressionStatement();
-    TypeName parseType();
+    Type parseType();
     void parseIf();
     void parseWhile();
     void parseImport();

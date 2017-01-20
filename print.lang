@@ -18,15 +18,15 @@ impl printable(f64) {
     }
 }
 
-impl printable(string) {
-    func printValue(val: string): void {
+impl printable(*i8) {
+    func printValue(val: *i8): void {
         fwrite(val, 1, strlen(val), stdout);
     }
 }
 
 impl printable(i8) {
     func printValue(val: i8): void {
-        printf("%d", val);
+        printf("%c", val);
     }
 }
 
@@ -35,7 +35,7 @@ impl printable(()) {
     }
 }
 
-func print(format: string, values: (...)): void
+func print(format: *i8, values: (...)): void
 {
     let ptr = strchr(format, '{');
     if (ptr) {

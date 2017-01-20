@@ -80,7 +80,7 @@ public:
     llvm::Module &module() { return *m_module.get(); }
     const llvm::Module &module() const { return *m_module.get(); }
 
-    llvm::Type *typeOf(const TypeName &type);
+    llvm::Type *typeOf(const std::string &name);
 
     const StructInfo *structInfo(llvm::Type *type) const;
     StructInfo *newStructType(llvm::StructType *type);

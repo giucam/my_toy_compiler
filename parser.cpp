@@ -268,7 +268,7 @@ void Parser::parseLet()
         auto expr = parseExpression();
 
         if (!isMulti) {
-            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, TypeName(), std::move(expr)));
+            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, Type(), std::move(expr)));
         } else {
             var = new NMultiVariableDeclaration(letTok, nameToks, std::move(expr));
         }
@@ -343,11 +343,11 @@ void Parser::parseStruct()
     m_block->statements.push_back(decl);
 }
 
-std::vector<TypeName> Parser::parseParameterList()
+std::vector<Type> Parser::parseParameterList()
 {
     checkTokenType(nextToken(), Token::Type::LeftParens);
 
-    std::vector<TypeName> list;
+    std::vector<Type> list;
     while (m_lexer.peekToken().type() != Token::Type::RightParens) {
 //     auto tok = nextToken();
 //     while (tok.type() != Token::Type::RightParens) {
@@ -598,34 +598,83 @@ void Parser::parseExtern()
     m_block->statements.push_back(decl);
 }
 
-TypeName Parser::parseType()
+Type Parser::parseType()
 {
-    int pointer = 0;
     auto typeTok = nextToken();
+    auto checkPointer = [&]() {
+        int p = 0;
+        while (typeTok.type() == Token::Type::Star) {
+            typeTok = nextToken();
+            p++;
+        }
+        return p;
+    };
+
+    int pointer = checkPointer();
+
+    auto getPointer = [&](Type t) {
+        for (int i = 0; i < pointer; ++i) {
+            t = t.getPointerTo();
+        }
+        return t;
+    };
+
     if (typeTok.type() == Token::Type::LeftParens) {
-        std::vector<Token> types;
-        std::string type = "(";
+        if (m_lexer.peekToken().type() == Token::Type::Ellipsis) {
+            nextToken();
+            nextToken(Token::Type::RightParens);
+            if (pointer != 0) {
+                err(typeTok, "argument packs cannot have '*' qualifier");
+            }
+            return ArgumentPackType();
+        }
+
+        std::vector<Type> types;
         while (m_lexer.peekToken().type() != Token::Type::RightParens) {
-            auto tok = nextToken();
-            types.push_back(tok);
-            type += tok.type() == Token::Type::Ellipsis ? "..." : tok.text();
+            types.push_back(parseType());
 
             if (m_lexer.peekToken().type() == Token::Type::Comma) {
-                type += ", ";
                 nextToken();
             }
         }
-        type += ")";
         nextToken();
 
-        return TypeName(typeTok, type, 0);
-    }
-    while (typeTok.type() == Token::Type::Star) {
-        typeTok = nextToken();
-        pointer++;
+        return getPointer(TupleType(types));
     }
     checkTokenType(typeTok, Token::Type::Identifier);
-    return TypeName(typeTok, typeTok.text(), pointer);
+
+    auto name = typeTok.text();
+    if (name == "void") {
+        if (pointer == 0) {
+            return VoidType();
+        } else {
+            return getPointer(IntegerType(true, 8));
+        }
+    } else if (name == "i8") {
+        return getPointer(IntegerType(true, 8));
+    } else if (name == "i16") {
+        return getPointer(IntegerType(true, 16));
+    } else if (name == "i32") {
+        return getPointer(IntegerType(true, 32));
+    } else if (name == "i64") {
+        return getPointer(IntegerType(true, 64));
+    } else if (name == "u8") {
+        return getPointer(IntegerType(false, 8));
+    } else if (name == "u16") {
+        return getPointer(IntegerType(false, 16));
+    } else if (name == "u32") {
+        return getPointer(IntegerType(false, 32));
+    } else if (name == "u64") {
+        return getPointer(IntegerType(false, 64));
+    } else if (name == "f32") {
+        return getPointer(FloatingType(32));
+    } else if (name == "f64") {
+        return getPointer(FloatingType(64));
+    } else if (name == "...") {
+        err(typeTok, "'...' can only be used in parameter packs");
+    }
+
+    return getPointer(CustomType(typeTok, typeTok.text()));
 }
 
 NFunctionDeclaration *Parser::parseFunc()

@@ -9,6 +9,7 @@
 
 #include "lexer.h"
 #include "codegen.h"
+#include "types.h"
 
 class CodeGenContext;
 class Value;
@@ -38,115 +39,6 @@ public:
 
 private:
     Token m_token;
-};
-
-class Type
-{
-    struct IfaceBase {
-        virtual ~IfaceBase() {}
-        virtual llvm::Type *get(CodeGenContext &ctx) const = 0;
-        virtual bool isVarArg() const = 0;
-    };
-    template <class T>
-    struct Iface : IfaceBase {
-        Iface(T d) : data(std::move(d)) {}
-        llvm::Type *get(CodeGenContext &ctx) const override { return data.get(ctx); }
-        bool isVarArg() const override { return data.isVarArg(); }
-        T data;
-    };
-
-public:
-    template <class T>
-    Type(T handler)
-        : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
-
-    inline llvm::Type *get(CodeGenContext &ctx) const { return m_iface->get(ctx); }
-    inline bool isVarArg() const { return m_iface->isVarArg(); }
-
-    Type getPointerTo();
-
-private:
-    std::shared_ptr<const IfaceBase> m_iface;
-};
-
-class IntegerType
-{
-public:
-    IntegerType(bool sign, int bits) : m_signed(sign), m_bits(bits) {}
-
-    llvm::Type *get(CodeGenContext &ctx) const;
-    bool isVarArg() const;
-
-private:
-    bool m_signed;
-    int m_bits;
-};
-
-class VoidType
-{
-public:
-    VoidType() {}
-
-    llvm::Type *get(CodeGenContext &ctx) const;
-    bool isVarArg() const;
-};
-
-class TypeName
-{
-public:
-    TypeName() {}
-    TypeName(const Token &tok, const std::string &name, int pointer = 0) : m_token(tok), m_name(name), m_pointer(pointer) {}
-
-    const Token &token() const { return m_token; }
-    bool valid() const { return !m_name.empty(); }
-    const std::string &name() const { return m_name; }
-    int pointer() const { return m_pointer; }
-
-    llvm::Type *get(CodeGenContext &ctx) const;
-    bool isVarArg() const;
-
-private:
-    Token m_token;
-    std::string m_name;
-    int m_pointer;
-};
-
-class PointerType
-{
-public:
-    PointerType(Type t) : m_type(t) {}
-
-    llvm::Type *get(CodeGenContext &ctx) const;
-    bool isVarArg() const;
-
-private:
-    Type m_type;
-};
-
-class FunctionPointerType
-{
-public:
-    FunctionPointerType(Type ret, std::vector<Type> &args) : m_ret(ret) { std::swap(args, m_args); }
-
-    llvm::Type *get(CodeGenContext &ctx) const;
-    bool isVarArg() const;
-
-private:
-    Type m_ret;
-    std::vector<Type> m_args;
-};
-
-class ArrayType
-{
-public:
-    ArrayType(Type t, int n) : m_type(t), m_num(n) {}
-
-    llvm::Type *get(CodeGenContext &ctx) const;
-    bool isVarArg() const;
-
-private:
-    Type m_type;
-    int m_num;
 };
 
 class NExpression : public Node
@@ -340,12 +232,12 @@ public:
 class NVarExpressionInitializer : public NVariableInitializer
 {
 public:
-    NVarExpressionInitializer(const Token &tok, const TypeName &type, std::unique_ptr<NExpression> expr) : token(tok), type(type), expression(std::move(expr)) {}
+    NVarExpressionInitializer(const Token &tok, const Type &type, std::unique_ptr<NExpression> expr) : token(tok), type(type), expression(std::move(expr)) {}
 
     Value init(CodeGenContext &ctx, const std::string &name) override;
 
     Token token;
-    TypeName type;
+    Type type;
     std::unique_ptr<NExpression> expression;
 };
 
@@ -358,10 +250,10 @@ public:
         std::unique_ptr<NExpression> init;
     };
     Token token;
-    TypeName type;
+    Type type;
     std::vector<Field> fields;
 
-    NVarStructInitializer(const Token &tok, const TypeName &type, std::vector<Field> &f) : token(tok), type(type) { std::swap(fields, f); }
+    NVarStructInitializer(const Token &tok, const Type &type, std::vector<Field> &f) : token(tok), type(type) { std::swap(fields, f); }
 
     Value init(CodeGenContext &ctx, const std::string &name) override;
 };
@@ -441,11 +333,11 @@ private:
 
 class NFunctionDeclaration : public NStatement {
 public:
-    TypeName type;
+    Type type;
     std::string id;
     std::vector<NFunctionArgumentDeclaration> arguments;
     NBlock *block;
-    NFunctionDeclaration(const std::string &id, const TypeName &type,
+    NFunctionDeclaration(const std::string &id, const Type &type,
                          const std::vector<NFunctionArgumentDeclaration> &arguments, NBlock *block) :
                             type(type), id(id), arguments(arguments), block(block) { }
 
@@ -495,34 +387,34 @@ public:
 
 class NIfaceDeclaration: public NStatement {
 public:
-    NIfaceDeclaration(const std::string &name, std::vector<TypeName> &par, NIfacePrototypeList &pro) : name(name) { std::swap(parameters, par); std::swap(prototypes, pro); }
+    NIfaceDeclaration(const std::string &name, std::vector<Type> &par, NIfacePrototypeList &pro) : name(name) { std::swap(parameters, par); std::swap(prototypes, pro); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 
     std::string name;
-    std::vector<TypeName> parameters;
+    std::vector<Type> parameters;
     NIfacePrototypeList prototypes;
     std::vector<NImplDeclaration *> implementations;
 };
 
 class NIfacePrototype : public NStatement {
 public:
-    NIfacePrototype(const std::string &name, std::vector<TypeName> &par) : name(name) { std::swap(parameters, par); }
+    NIfacePrototype(const std::string &name, std::vector<Type> &par) : name(name) { std::swap(parameters, par); }
 
     std::string name;
-    std::vector<TypeName> parameters;
+    std::vector<Type> parameters;
     NIfaceDeclaration *iface;
 };
 
 class NImplDeclaration : public NStatement
 {
 public:
-    NImplDeclaration(const std::string &name, std::vector<TypeName> &par, FuncDeclarationList &funcs) : name(name) { std::swap(parameters, par); std::swap(functions, funcs); }
+    NImplDeclaration(const std::string &name, std::vector<Type> &par, FuncDeclarationList &funcs) : name(name) { std::swap(parameters, par); std::swap(functions, funcs); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
     std::string name;
     std::string id;
-    std::vector<TypeName> parameters;
+    std::vector<Type> parameters;
     FuncDeclarationList functions;
     std::vector<llvm::Type *> parameterTypes;
 };

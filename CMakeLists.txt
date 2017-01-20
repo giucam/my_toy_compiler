@@ -21,6 +21,7 @@ set(SOURCES
     parser.cpp
     value.cpp
     cparser.cpp
+    types.cpp
     fmt/format.cc
     fmt/ostream.cc)
 
