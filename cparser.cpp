@@ -11,6 +11,22 @@
 #include "node.h"
 #include "cparser.h"
 
+static bool isInDir(const std::string &dirName, const std::string &entry)
+{
+    DIR *d = opendir(dirName.c_str());
+    dirent *dir;
+    if (d) {
+        while ((dir = readdir(d))) {
+            if (entry == dir->d_name) {
+                return true;
+            }
+        }
+
+        closedir(d);
+    }
+    return false;
+}
+
 static std::string findFile(const std::string &file)
 {
     if (file[0] == '/' || file[0] == '.') {
@@ -18,22 +34,27 @@ static std::string findFile(const std::string &file)
     }
 
     std::string includeDir = "/usr/include";
-    DIR *d = opendir(includeDir.c_str());
-    dirent *dir;
-    if (d) {
-        while ((dir = readdir(d))) {
-            if (file == dir->d_name) {
-                return includeDir + '/' + dir->d_name;
-            }
+    size_t start = 0;
+    std::string found = includeDir;
+    while (start < file.size()) {
+        size_t end = file.find('/', start);
+        if (end == std::string::npos) {
+            end = file.size();
+        }
+        auto substr = file.substr(start, end - start);
+        if (!isInDir(found, substr)) {
+            fmt::print("not found\n");
+            break;
         }
 
-        closedir(d);
+        found += "/" + substr;
+        start = end + 1;
     }
 
-    if (access(file.c_str(), F_OK) != 0) {
+    if (access(found.c_str(), F_OK) != 0) {
         error("cannot open file '{}' for reading", file);
     }
-    return file;
+    return found;
 }
 
 CParser::CParser(const std::string &filename)
