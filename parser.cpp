@@ -57,6 +57,7 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
         NBinaryOperator::OP op = [&]() {
             switch (opTok.type()) {
                 case Token::Type::Star: return NBinaryOperator::OP::Mul;
+                case Token::Type::Div: return NBinaryOperator::OP::Div;
                 case Token::Type::Plus: return NBinaryOperator::OP::Add;
                 case Token::Type::Minus: return NBinaryOperator::OP::Sub;
                 case Token::Type::LeftAngleBracket: return NBinaryOperator::OP::Lesser;
@@ -183,6 +184,7 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
             case Token::Type::RightAngleBracket:
             case Token::Type::CompareEqual:
             case Token::Type::Star:
+            case Token::Type::Div:
             case Token::Type::Minus:
             case Token::Type::Plus: {
                 expr = parseBinOp(std::move(expr), 0);
