@@ -52,6 +52,9 @@ public:
 
     void attach(std::unique_ptr<NExpression> ex) { m_attached.push_back(std::move(ex)); }
 
+    virtual void pushConstraints(bool negate) {}
+    virtual void popConstraints() {}
+
 //     virtual llvm::Value *load(CodeGenContext &context) { return codeGen(context); }
 //     virtual std::vector<NExpression *> unpack(CodeGenContext &) { return { this }; }
 
@@ -147,6 +150,7 @@ public:
         Lesser,
         Greater,
         Equal,
+        NotEqual,
     };
 
     OP op;
@@ -155,6 +159,15 @@ public:
     NBinaryOperator(std::unique_ptr<NExpression> lhs, OP op, std::unique_ptr<NExpression> rhs) :
                 NExpression(), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
     Optional<Value> codeGen(CodeGenContext &context) override;
+
+    void pushConstraints(bool negate) override;
+    void popConstraints() override;
+
+    struct Constraint {
+        Value lVal;
+        Value rVal;
+    };
+    std::vector<Constraint> m_constraints;
 };
 
 class NAssignment : public NExpression {

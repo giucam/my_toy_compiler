@@ -37,6 +37,7 @@ static int opPrecedence(Token::Type t)
         case Token::Type::LeftAngleBracket: return 10;
         case Token::Type::RightAngleBracket: return 10;
         case Token::Type::CompareEqual: return 5;
+        case Token::Type::CompareNotEqual: return 5;
         default:
             break;
     }
@@ -63,6 +64,7 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
                 case Token::Type::LeftAngleBracket: return NBinaryOperator::OP::Lesser;
                 case Token::Type::RightAngleBracket: return NBinaryOperator::OP::Greater;
                 case Token::Type::CompareEqual: return NBinaryOperator::OP::Equal;
+                case Token::Type::CompareNotEqual: return NBinaryOperator::OP::NotEqual;
                 default:
                     abort();
             }
@@ -183,6 +185,7 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
             case Token::Type::LeftAngleBracket:
             case Token::Type::RightAngleBracket:
             case Token::Type::CompareEqual:
+            case Token::Type::CompareNotEqual:
             case Token::Type::Star:
             case Token::Type::Div:
             case Token::Type::Minus:
@@ -621,6 +624,7 @@ Type Parser::parseType()
         return t;
     };
 
+    Type type;
     if (typeTok.type() == Token::Type::LeftParens) {
         if (m_lexer.peekToken().type() == Token::Type::Ellipsis) {
             nextToken();
@@ -641,42 +645,70 @@ Type Parser::parseType()
         }
         nextToken();
 
-        return getPointer(TupleType(types));
-    }
-    checkTokenType(typeTok, Token::Type::Identifier);
+        type = TupleType(types);
+    } else {
+        checkTokenType(typeTok, Token::Type::Identifier);
 
-    auto name = typeTok.text();
-    if (name == "void") {
-        if (pointer == 0) {
-            return VoidType();
+        auto name = typeTok.text();
+        if (name == "void") {
+            if (pointer == 0) {
+                return VoidType();
+            } else {
+                type = IntegerType(true, 8);
+            }
+        } else if (name == "i8") {
+            type = IntegerType(true, 8);
+        } else if (name == "i16") {
+            type = IntegerType(true, 16);
+        } else if (name == "i32") {
+            type = IntegerType(true, 32);
+        } else if (name == "i64") {
+            type = IntegerType(true, 64);
+        } else if (name == "u8") {
+            type = IntegerType(false, 8);
+        } else if (name == "u16") {
+            type = IntegerType(false, 16);
+        } else if (name == "u32") {
+            type = IntegerType(false, 32);
+        } else if (name == "u64") {
+            type = IntegerType(false, 64);
+        } else if (name == "f32") {
+            type = FloatingType(32);
+        } else if (name == "f64") {
+            type = FloatingType(64);
+        } else if (name == "...") {
+            err(typeTok, "'...' can only be used in parameter packs");
         } else {
-            return getPointer(IntegerType(true, 8));
+            type = CustomType(typeTok, typeTok.text());
         }
-    } else if (name == "i8") {
-        return getPointer(IntegerType(true, 8));
-    } else if (name == "i16") {
-        return getPointer(IntegerType(true, 16));
-    } else if (name == "i32") {
-        return getPointer(IntegerType(true, 32));
-    } else if (name == "i64") {
-        return getPointer(IntegerType(true, 64));
-    } else if (name == "u8") {
-        return getPointer(IntegerType(false, 8));
-    } else if (name == "u16") {
-        return getPointer(IntegerType(false, 16));
-    } else if (name == "u32") {
-        return getPointer(IntegerType(false, 32));
-    } else if (name == "u64") {
-        return getPointer(IntegerType(false, 64));
-    } else if (name == "f32") {
-        return getPointer(FloatingType(32));
-    } else if (name == "f64") {
-        return getPointer(FloatingType(64));
-    } else if (name == "...") {
-        err(typeTok, "'...' can only be used in parameter packs");
+
+        type = getPointer(type);
     }
 
-    return getPointer(CustomType(typeTok, typeTok.text()));
+    if (m_lexer.peekToken().type() == Token::Type::Pipe) {
+        nextToken();
+        nextToken(Token::Type::Dollar);
+
+        auto opTok = nextToken();
+        auto valueTok = nextToken();
+
+        auto op = [&]() {
+            if (opTok.type() == Token::Type::CompareEqual)
+                return TypeConstraint::Operator::Equal;
+            if (opTok.type() == Token::Type::CompareNotEqual)
+                return TypeConstraint::Operator::NotEqual;
+            if (opTok.type() == Token::Type::LeftAngleBracket)
+                return TypeConstraint::Operator::Lesser;
+            if (opTok.type() == Token::Type::RightAngleBracket)
+                return TypeConstraint::Operator::Greater;
+            err(opTok, "cannot parse type constraint");
+            return TypeConstraint::Operator::Equal;
+        }();
+
+        type.setTypeConstraint(TypeConstraint(op, std::stol(valueTok.text())));
+    }
+
+    return type;
 }
 
 NFunctionDeclaration *Parser::parseFunc()

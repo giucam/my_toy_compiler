@@ -242,9 +242,15 @@ Token Lexer::readNextToken()
             return token(Token::Type::Minus);
         } else if (m_lastChar == '=') {
             if (nextChar() == '=') {
+                nextChar();
                 return token(Token::Type::CompareEqual);
             } else {
                 return token(Token::Type::Equal);
+            }
+        } else if (m_lastChar == '!') {
+            if (nextChar() == '=') {
+                nextChar();
+                return token(Token::Type::CompareNotEqual);
             }
         } else if (m_lastChar == '&') {
             nextChar();
@@ -255,6 +261,12 @@ Token Lexer::readNextToken()
         } else if (m_lastChar == '>') {
             nextChar();
             return token(Token::Type::RightAngleBracket);
+        } else if (m_lastChar == '|') {
+            nextChar();
+            return token(Token::Type::Pipe);
+        } else if (m_lastChar == '$') {
+            nextChar();
+            return token(Token::Type::Dollar);
         } else {
             break;
         }
@@ -264,5 +276,6 @@ Token Lexer::readNextToken()
         return token(Token::Type::EOF);
     }
 
+    nextChar();
     return token(Token::Type::Unknown);
 }

@@ -6,9 +6,121 @@
 #include "codegen.h"
 #include "common.h"
 
-Type Type::getPointerTo()
+Type Type::getPointerTo() const
 {
     return PointerType(*this);
+}
+
+std::string Type::name() const
+{
+    return m_iface->name() + m_constraint.name();
+}
+
+void Type::setTypeConstraint(const TypeConstraint &c)
+{
+    m_constraint = c;
+}
+
+TypeConstraint::TypeConstraint()
+{
+}
+
+TypeConstraint::TypeConstraint(TypeConstraint::Operator op, int v)
+{
+    m_constraints.push_back({op, v, nullptr});
+}
+
+std::string TypeConstraint::name() const
+{
+    std::string n;
+
+    int i = 0;
+    for (auto &&c: m_constraints) {
+        n += (i++ == 0) ? "|$ " : ", $ ";
+        switch (c.op) {
+            case Operator::Equal:
+                n += "== ";
+                break;
+            case Operator::NotEqual:
+                n += "!= ";
+                break;
+            case Operator::Greater:
+                n += "> ";
+                break;
+            case Operator::Lesser:
+                n += "< ";
+                break;
+        }
+        n += std::to_string(c.value);
+    }
+    return n;
+}
+
+bool TypeConstraint::isCompatibleWith(const TypeConstraint &c) const
+{
+    auto isCompat = [&](const Constraint &c1, const Constraint &c2) {
+        switch (c2.op) {
+            case Operator::Equal:
+                return c1.op == Operator::Equal && c1.value == c2.value;
+            case Operator::NotEqual:
+                return (c1.op == Operator::NotEqual && c1.value == c2.value) ||
+                       (c1.op == Operator::Equal && c1.value != c2.value) ||
+                       (c1.op == Operator::Greater && c1.value >= c2.value) ||
+                       (c1.op == Operator::Lesser && c1.value <= c2.value);
+            case Operator::Greater:
+                return (c1.op == Operator::Equal && c1.value > c2.value) ||
+                       (c1.op == Operator::Greater && c1.value >= c2.value);
+            case Operator::Lesser:
+                return (c1.op == Operator::Equal && c1.value < c2.value) ||
+                       (c1.op == Operator::Lesser && c1.value <= c2.value);
+        }
+        return false;
+    };
+
+    if (m_constraints.empty() && !c.m_constraints.empty()) {
+        return false;
+    }
+
+    for (auto &&c1: m_constraints) {
+        for (auto &&c2: c.m_constraints) {
+            if (!isCompat(c1, c2)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void TypeConstraint::addConstraint(Operator op, int v)
+{
+    m_constraints.push_back({ op, v, nullptr });
+}
+
+void TypeConstraint::add(const TypeConstraint &constraint, void *source)
+{
+    for (auto &&c: constraint.m_constraints) {
+        m_constraints.push_back({c.op, c.value, source});
+    }
+}
+
+void TypeConstraint::addNegate(const TypeConstraint &constraint, void *source)
+{
+    for (auto &&c: constraint.m_constraints) {
+        switch (c.op) {
+            case Operator::Equal:
+                m_constraints.push_back({ Operator::NotEqual, c.value, source });
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void TypeConstraint::removeFromSource(void *source)
+{
+    m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
+                                       [&](const Constraint &c) { return c.source == source; }),
+                        m_constraints.end());
 }
 
 llvm::Type *VoidType::get(CodeGenContext &ctx) const
@@ -145,4 +257,10 @@ llvm::Type *CustomType::get(CodeGenContext &ctx) const
 std::string CustomType::name() const
 {
     return m_name;
+}
+
+
+std::string LlvmType::name() const
+{
+    return typeName(m_type);
 }

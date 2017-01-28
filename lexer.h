@@ -43,11 +43,14 @@ public:
         Equal,
         Ellipsis,
         CompareEqual,
+        CompareNotEqual,
         StringLiteral,
         CharLiteral,
         Ampersand,
         LeftAngleBracket,
         RightAngleBracket,
+        Pipe,
+        Dollar,
         True,
         False,
         Import,
@@ -108,11 +111,14 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(Equal, "'='")
         TOKSTR(Ellipsis, "'...'")
         TOKSTR(CompareEqual, "'=='")
+        TOKSTR(CompareNotEqual, "'!='")
         TOK(StringLiteral)
         TOK(CharLiteral)
         TOKSTR(Ampersand, "'&'")
         TOKSTR(LeftAngleBracket, "'<'")
         TOKSTR(RightAngleBracket, "'>'")
+        TOKSTR(Pipe, "'|'")
+        TOKSTR(Dollar, "'$'")
         TOKSTR(True, "'true'")
         TOKSTR(False, "'false'")
         TOKSTR(Import, "'import'")

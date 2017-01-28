@@ -14,6 +14,35 @@ namespace llvm {
 
 class CodeGenContext;
 
+class TypeConstraint
+{
+public:
+    enum class Operator {
+        Equal,
+        NotEqual,
+        Greater,
+        Lesser,
+    };
+    TypeConstraint();
+    TypeConstraint(Operator op, int v);
+
+    bool isCompatibleWith(const TypeConstraint &c) const;
+    std::string name() const;
+
+    void addConstraint(Operator op, int v);
+    void add(const TypeConstraint &c, void *source);
+    void addNegate(const TypeConstraint &c, void *source);
+    void removeFromSource(void *source);
+
+private:
+    struct Constraint {
+        Operator op;
+        int value;
+        void *source;
+    };
+    std::vector<Constraint> m_constraints;
+};
+
 class Type
 {
     struct IfaceBase {
@@ -37,11 +66,11 @@ public:
         : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
 
     inline llvm::Type *get(CodeGenContext &ctx) const { return m_iface->get(ctx); }
-    inline std::string name() const { return m_iface->name(); }
+    std::string name() const;
 
     bool isValid() const { return m_iface.get(); }
 
-    Type getPointerTo();
+    Type getPointerTo() const;
 
     template<class T>
     const T *getSpecialization() const
@@ -52,8 +81,13 @@ public:
         return nullptr;
     }
 
+    void setTypeConstraint(const TypeConstraint &c);
+    const TypeConstraint &typeConstraint() const { return m_constraint; }
+    TypeConstraint &typeConstraint() { return m_constraint; }
+
 private:
     std::shared_ptr<const IfaceBase> m_iface;
+    TypeConstraint m_constraint;
 };
 #define TYPE_SPECIALIZATION \
 static void *magic() { static int a; return &a; } \
@@ -100,13 +134,13 @@ class PointerType
 {
     TYPE_SPECIALIZATION
 public:
-    PointerType(Type t) : m_type(t) {}
+    PointerType(const Type t) : m_type(t) {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
 private:
-    Type m_type;
+    const Type m_type;
 };
 
 class FunctionPointerType
@@ -172,6 +206,19 @@ public:
 private:
     Token m_token;
     std::string m_name;
+};
+
+class LlvmType
+{
+    TYPE_SPECIALIZATION
+public:
+    LlvmType(llvm::Type *t) : m_type(t) {}
+
+    llvm::Type *get(CodeGenContext &ctx) const { return m_type; }
+    std::string name() const;
+
+private:
+    llvm::Type *m_type;
 };
 
 #endif

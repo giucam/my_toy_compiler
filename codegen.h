@@ -42,6 +42,7 @@ public:
     operator bool() const { return m_valid; }
     operator const T &() const { return m_value; }
     const T *operator->() const { return &m_value; }
+    T *operator->() { return &m_value; }
 
 private:
     bool m_valid;
@@ -70,6 +71,10 @@ struct TupleInfo {
     llvm::Type *type;
 };
 
+struct FunctionInfo {
+    std::vector<Type> argTypes;
+};
+
 class CodeGenContext {
 public:
     CodeGenContext(const std::string &name);
@@ -96,6 +101,9 @@ public:
 
     llvm::Function *functionTemplate(const std::string &name, std::vector<Value::V> &values);
     void addFunctionTemplate(NFunctionDeclaration *func);
+
+    FunctionInfo *addFunctionInfo(llvm::Function *function);
+    const FunctionInfo *functionInfo(llvm::Function *function) const;
 
     void generateCode(NBlock &root);
 
@@ -132,6 +140,7 @@ private:
     std::unordered_map<std::string, NFunctionDeclaration *> m_functionTemplates;
     std::unordered_map<std::string, llvm::Function *> m_concreteTemplates;
     std::unordered_map<std::string, Value> m_globals;
+    std::unordered_map<llvm::Function *, FunctionInfo> m_functionInfo;
 };
 
 std::string typeName(llvm::Type *ty);

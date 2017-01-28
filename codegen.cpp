@@ -157,6 +157,20 @@ const TupleInfo *CodeGenContext::tupleInfo(llvm::Type *type) const
     return nullptr;
 }
 
+FunctionInfo *CodeGenContext::addFunctionInfo(llvm::Function *fun)
+{
+    return &m_functionInfo[fun];
+}
+
+const FunctionInfo *CodeGenContext::functionInfo(llvm::Function *fun) const
+{
+    auto it = m_functionInfo.find(fun);
+    if (it == m_functionInfo.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
 NIfacePrototype *CodeGenContext::ifacePrototype(const std::string &name) const
 {
     auto it = m_ifacePrototypes.find(name);
@@ -257,23 +271,31 @@ llvm::Value *CodeGenContext::allocate(llvm::Type *type, const std::string &name,
 
 /* -- Code Generation -- */
 
+Value constantInteger(CodeGenContext &ctx, int val)
+{
+    Type t = IntegerType(true, 32);
+    t.setTypeConstraint(TypeConstraint(TypeConstraint::Operator::Equal, val));
+    return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context()), val, true), t);
+}
+
 Optional<Value> NInteger::codeGen(CodeGenContext &context)
 {
     std::cout << "Creating integer: " << value << '\n';
-
-    return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context.context()), value, true));
+    return constantInteger(context, value);
 }
 
 Optional<Value> NBoolean::codeGen(CodeGenContext &context)
 {
-    return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt1Ty(context.context()), value, true));
+    auto v = llvm::ConstantInt::get(llvm::Type::getInt1Ty(context.context()), value, true);
+    return simpleValue(v, LlvmType(v->getType()));
 }
 
 Optional<Value> NDouble::codeGen(CodeGenContext &context)
 {
     std::cout << "Creating double: " << value << '\n';
 
-    return simpleValue(llvm::ConstantFP::get(llvm::Type::getDoubleTy(context.context()), value));
+    auto v = llvm::ConstantFP::get(llvm::Type::getDoubleTy(context.context()), value);
+    return simpleValue(v, LlvmType(v->getType()));
 }
 
 Optional<Value> NString::codeGen(CodeGenContext &context)
@@ -296,21 +318,22 @@ Optional<Value> NString::codeGen(CodeGenContext &context)
     auto id1 = llvm::ConstantInt::get(context.context(), llvm::APInt(32, 0, false));
     auto id2 = llvm::ConstantInt::get(context.context(), llvm::APInt(32, 0, false));
 
-    return simpleValue(llvm::GetElementPtrInst::CreateInBounds(var, {id1, id2}, "", context.currentBlock()->block));
+    auto v = llvm::GetElementPtrInst::CreateInBounds(var, {id1, id2}, "", context.currentBlock()->block);
+    return simpleValue(v, LlvmType(v->getType()));
 }
 
-static Value createValue(CodeGenContext &ctx, llvm::Value *value, llvm::Type *valueType)
+static Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType)
 {
-    auto type = valueType;
+    auto type = valueType.get(ctx);
     while (type->isPointerTy()) {
         type = type->getPointerElementType();
     }
 
     if (type->isStructTy()) {
         if (auto info = ctx.structInfo(type)) {
-            return structValue(value, valueType, info, ctx);
+            return structValue({}, value, valueType.get(ctx), info, ctx);
         } else if (auto info = ctx.tupleInfo(type)) {
-            return tupleValue(value, valueType, info, ctx);
+            return tupleValue({}, value, valueType.get(ctx), info, ctx);
         }
     }
     return simpleValue(value, valueType);
@@ -370,22 +393,26 @@ Optional<Value> NAddressOfExpression::codeGen(CodeGenContext &context)
         {
             return values;
         }
+        std::vector<Value::V> &unpack()
+        {
+            return values;
+        }
 
         RefValueH clone(std::vector<Value::V> &values) const
         {
             return RefValueH(value, values);
         }
 
-        Value::V extract(int id) const { auto v = value.extract(id); return { v.value, v.value->getType(), v.mut }; }
-        Value::V extract(const std::string &name) const { auto v = value.extract(name); return { v.value, v.value->getType(), v.mut }; }
+        Value::V extract(int id) const { auto v = value.extract(id); return { v.value, v.type, v.mut }; }
+        Value::V extract(const std::string &name) const { auto v = value.extract(name); return { v.value, v.type, v.mut }; }
     };
 
     std::vector<Value::V> values;
     for (auto &&v: val->unpack()) {
-        values.push_back({v.value, v.type->getPointerTo(), true});
+        values.push_back({v.value, v.type.getPointerTo(), true});
     }
 
-    return Value(RefValueH(val, values));
+    return Value(RefValueH(val, values), {});
 }
 
 static std::string mangleFuncName(const std::string &name, const std::string &iface, const std::string &sig)
@@ -424,7 +451,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
         llvm::Type *valueType = nullptr;
         if (it->type().getSpecialization<ArgumentPackType>()) {
             for (auto it = valueIt; it < values.end(); ++it) {
-                auto ty = it->type;
+                auto ty = it->type.get(*this);
                 if (ty->isStructTy()) {
                     ty = ty->getPointerTo();
                 }
@@ -432,7 +459,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
             }
             break;
         } else {
-            valueType = valueIt->type;
+            valueType = valueIt->type.get(*this);
         }
 
         addType(valueType);
@@ -461,7 +488,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
                 argumentValue->setName(it->name().c_str());
 
                 auto alloc = allocate(*typeIt, it->name(), argumentValue);
-                values.push_back({alloc, *typeIt});
+                values.push_back({alloc, LlvmType(*typeIt)});
             }
             auto value = valuePack(values);
             storeLocal(it->name(), value);
@@ -472,7 +499,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
         argumentValue->setName(it->name().c_str());
 
         auto alloc = allocate(*typeIt, it->name(), argumentValue);
-        auto value = createValue(*this, alloc, *typeIt);
+        auto value = createValue(*this, alloc, LlvmType(*typeIt));
         value.setMutable(it->isMutable());
 
         storeLocal(it->name(), value);
@@ -550,6 +577,18 @@ static llvm::Function *findInterfaceImpl(const Token &tok, const std::string &na
     return nullptr;
 }
 
+static bool canStoreInto(const Token &token, CodeGenContext &ctx, const Type &lhs, const Type &rhs)
+{
+    if (lhs.get(ctx) != rhs.get(ctx)) {
+        return false;
+    }
+
+    if (!rhs.typeConstraint().isCompatibleWith(lhs.typeConstraint())) {
+        err(token, "cannot assign a value of type '{}' to a variable of type '{}': type constraint not respected", rhs.name(), lhs.name());
+    }
+    return true;
+}
+
 Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
 {
     std::cout << "Creating method call: " << name << '\n';
@@ -566,7 +605,7 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
     }
 
     if (name == "count") {
-        return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context.context()), values.size(), true));
+        return constantInteger(context, values.size());
     }
 
     llvm::Function *function = context.module().getFunction(name.c_str());
@@ -591,6 +630,13 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
         if (!converted) {
             err(token(), "wrong argument type to function; expected '{}', found '{}'", typeName(argTy), typeName(values[i].value->getType()));
         }
+
+        auto info = context.functionInfo(function);
+        if (info) {
+            canStoreInto(token(), context, info->argTypes[i], values[i].type);
+        }
+
+
         values[i].value = converted;
         i++;
     }
@@ -612,7 +658,7 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
     }
 
     llvm::CallInst *call = llvm::CallInst::Create(function, llvm::makeArrayRef(vals), "", context.currentBlock()->block);
-    return createValue(context, call, function->getReturnType());
+    return createValue(context, call, LlvmType(function->getReturnType()));
 }
 
 Optional<Value> NAssignment::codeGen(CodeGenContext &context)
@@ -626,13 +672,16 @@ Optional<Value> NAssignment::codeGen(CodeGenContext &context)
         err(token(), "attempting to assign to non-mutable variable");
     }
 
-    auto lhsVec = lhsValue->unpack();
+    auto &lhsVec = lhsValue->unpack();
     auto rhsVec = rhsValue->unpack();
 
     assert(lhsVec.size() == rhsVec.size());
 
     for (size_t i = 0; i < lhsVec.size(); ++i) {
         new llvm::StoreInst(rhsVec[i].value, lhsVec[i].value, false, context.currentBlock()->block);
+
+        lhsVec[i].type.setTypeConstraint(rhsVec[i].type.typeConstraint());
+
     }
     return lhsValue;
 }
@@ -734,7 +783,8 @@ Optional<Value> NReturnStatement::codeGen(CodeGenContext &context)
         }
     }
 
-    return simpleValue(llvm::ReturnInst::Create(context.context(), llvmval, context.currentBlock()->block));
+    auto v = llvm::ReturnInst::Create(context.context(), llvmval, context.currentBlock()->block);
+    return simpleValue(v, LlvmType(v->getType()));
 }
 
 Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &name)
@@ -747,14 +797,19 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
     if (type.isValid()) {
         auto t = type.get(ctx);
         llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
-        auto value = createValue(ctx, alloc, t);
+        auto value = createValue(ctx, alloc, type);
 
-        new llvm::StoreInst(init->unpack()[0].value, value.unpack()[0].value, false, ctx.currentBlock()->block);
+        auto &toStore = init->unpack()[0];
+        if (!canStoreInto(token, ctx, type, init->unpack()[0].type)) {
+            err(token, "mismatched type: assigning value of type '{}' to a variable of type '{}'", toStore.type.name(), type.name());
+        }
+
+        new llvm::StoreInst(toStore.value, value.unpack()[0].value, false, ctx.currentBlock()->block);
         return value;
     } else {
         std::vector<Value::V> values;
         for (auto &&val: init->unpack()) {
-            auto alloc = ctx.allocate(val.type, name, val.load(ctx));
+            auto alloc = ctx.allocate(val.type.get(ctx), name, val.load(ctx));
             values.push_back({alloc, val.type});
         }
 
@@ -777,7 +832,7 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
         err(token, "wrong number of initializers passed when declaring variable of type '{}'", name, type.name());
     }
 
-    auto value = createValue(ctx, alloc, t);
+    auto value = createValue(ctx, alloc, type);
 
     for (auto &&f: fields) {
         auto v = value.extract(f.name);
@@ -822,13 +877,13 @@ Optional<Value> NMultiVariableDeclaration::codeGen(CodeGenContext &context)
 
                 std::vector<Value::V> vals;
                 for (size_t j = i; j < values.size(); ++j) {
-                    auto alloc = context.allocate(values[j].type, name.name(), values[j].load(context));
+                    auto alloc = context.allocate(values[j].type.get(context), name.name(), values[j].load(context));
                     vals.push_back({alloc, values[j].type});
                 }
                 value = valuePack(vals);
                 value.setMutable(name.isMutable());
             } else {
-                auto alloc = context.allocate(val->type, name.name(), val->load(context));
+                auto alloc = context.allocate(val->type.get(context), name.name(), val->load(context));
                 value = createValue(context, alloc, val->type);
                 value.setMutable(name.isMutable());
             }
@@ -876,6 +931,12 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
     auto retType = type.get(context);
     llvm::FunctionType *ftype = llvm::FunctionType::get(retType, llvm::makeArrayRef(argTypes), false);
     llvm::Function *function = llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, id.c_str(), &context.module());
+
+    auto info = context.addFunctionInfo(function);
+    for (auto &&arg: arguments) {
+        info->argTypes.push_back(arg.type());
+    }
+
     if (block) {
         llvm::BasicBlock *bblock = llvm::BasicBlock::Create(context.context(), "entry", function, 0);
 
@@ -888,7 +949,7 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
             argumentValue->setName(it->name().c_str());
 
             auto alloc = context.allocate(*typesIt, it->name(), argumentValue);
-            auto value = createValue(context, alloc, *typesIt);
+            auto value = createValue(context, alloc, LlvmType(*typesIt));
             value.setMutable(it->isMutable());
             context.storeLocal(it->name(), value);
         }
@@ -1061,17 +1122,30 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
     llvm::BasicBlock *afterblock = llvm::BasicBlock::Create(ctx.context(), "endif", curBlock->function, 0);
 
     ctx.pushBlock(ifblock, curBlock->function, curBlock);
+    condition()->pushConstraints(false);
     block()->codeGen(ctx);
-    if (!ctx.currentBlock()->returned) {
+    bool ifReturned = ctx.currentBlock()->returned;
+    if (!ifReturned) {
         llvm::BranchInst::Create(afterblock, ctx.currentBlock()->block);
     }
+    condition()->popConstraints();
     ctx.popBlock();
+
+    if (ifReturned) {
+        condition()->pushConstraints(true);
+    }
 
     if (elseBlock()) {
         ctx.pushBlock(elseblock, curBlock->function, curBlock);
+        if (!ifReturned) {
+            condition()->pushConstraints(true);
+        }
         elseBlock()->codeGen(ctx);
         if (!ctx.currentBlock()->returned) {
             llvm::BranchInst::Create(afterblock, ctx.currentBlock()->block);
+        }
+        if (!ifReturned) {
+            condition()->popConstraints();
         }
         ctx.popBlock();
     }
@@ -1113,7 +1187,7 @@ Optional<Value> NExternVariableDeclaration::codeGen(CodeGenContext &ctx)
 {
     auto ty = type().get(ctx);
     auto val = new llvm::GlobalVariable(ctx.module(), ty, false, llvm::GlobalValue::ExternalLinkage, nullptr, name().c_str());
-    auto value = simpleValue(val);
+    auto value = simpleValue(val, LlvmType(val->getType()));
     ctx.storeGlobal(name(), value);
     return value;
 }

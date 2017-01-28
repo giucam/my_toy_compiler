@@ -3,30 +3,30 @@
 #include "codegen.h"
 #include "common.h"
 
-Value simpleValue(llvm::Value *val, llvm::Type *t)
+Value simpleValue(llvm::Value *val, const Type &type)
 {
-    if (!t) {
-        t = val->getType();
-    }
-
     struct SimpleValH
     {
-        SimpleValH(llvm::Value *val, llvm::Type *t) : values({{ val, t, true }}) {}
+        SimpleValH(llvm::Value *val, const Type &t) : values({{ val, t, true }}) {}
 
         const std::vector<Value::V> &unpack() const
+        {
+            return values;
+        }
+        std::vector<Value::V> &unpack()
         {
             return values;
         }
         Value::V extract(int id) const
         {
             if (id != 0) {
-                throw OutOfRangeException(typeName(values[0].type), 1);
+                throw OutOfRangeException(values[0].type.name(), 1);
             }
             return values[0];
         }
         Value::V extract(const std::string &name) const
         {
-            return { nullptr, nullptr };
+            return { nullptr, {} };
         }
 
         SimpleValH clone(std::vector<Value::V> &values) const
@@ -36,7 +36,7 @@ Value simpleValue(llvm::Value *val, llvm::Type *t)
 
         std::vector<Value::V> values;
     };
-    SimpleValH h(val, t);
+    SimpleValH h(val, type);
     return Value(std::move(h));
 }
 
@@ -48,13 +48,17 @@ struct ValuePackH
     {
         return values;
     }
+    std::vector<Value::V> &unpack()
+    {
+        return values;
+    }
     Value::V extract(int id) const
     {
         if (id < 0 || id >= (int)values.size()) {
             std::string name = "(";
             for (auto it = values.begin(); it != values.end(); ++it) {
                 auto &&v = *it;
-                name += typeName(v.type);
+                name += v.type.name();
                 if (it + 1 != values.end()) {
                     name += ", ";
                 }
@@ -67,7 +71,7 @@ struct ValuePackH
     }
     Value::V extract(const std::string &name) const
     {
-        return { nullptr, nullptr };
+        return { nullptr,  {} };
     }
     ValuePackH clone(std::vector<Value::V> &values) const
     {
@@ -81,16 +85,20 @@ Value valuePack(std::vector<Value::V> &vec)
     return Value(std::move(h));
 }
 
-Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
+Value structValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
 {
     struct StructValueH
     {
         StructValueH(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
-            : value({{alloc, type, true}}), info(i), ctx(c)
+            : value({{alloc, LlvmType(type), true}}), info(i), ctx(c)
         {
         }
 
         const std::vector<Value::V> &unpack() const
+        {
+            return value;
+        }
+        std::vector<Value::V> &unpack()
         {
             return value;
         }
@@ -111,7 +119,7 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
             auto st = static_cast<llvm::StructType *>(info->type);
 
             bool mut = info->fields[id].mut;
-            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), st->elements()[id], mut };
+            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), LlvmType(st->elements()[id]), mut };
         }
         Value::V extract(const std::string &name) const
         {
@@ -129,7 +137,7 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
         }
         StructValueH clone(std::vector<Value::V> &values) const
         {
-            return StructValueH(values[0].value, values[0].type, info, ctx);
+            return StructValueH(values[0].value, values[0].type.get(ctx), info, ctx);
         }
 
         std::vector<Value::V> value;
@@ -140,12 +148,12 @@ Value structValue(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, Cod
     return Value(std::move(h));
 }
 
-Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
+Value tupleValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
 {
     struct TupleValueH
     {
         TupleValueH(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
-            : value({{alloc, type, true}}), info(i), ctx(c)
+            : value({{alloc, LlvmType(type), true}}), info(i), ctx(c)
         {
         }
 
@@ -153,17 +161,21 @@ Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeG
         {
             return value;
         }
+        std::vector<Value::V> &unpack()
+        {
+            return value;
+        }
         Value::V extract(int id) const
         {
             if (id != 0) {
-                throw OutOfRangeException(typeName(value[0].type), 1);
+                throw OutOfRangeException(value[0].type.name(), 1);
             }
             return value[0];
         }
         Value::V extract(const std::string &name) const
         {
             throw InvalidFieldException(typeName(info->type));
-            return { nullptr, nullptr };
+            return { nullptr, {} };
         }
         ValuePackH clone(std::vector<Value::V> &values) const
         {
@@ -183,7 +195,7 @@ Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeG
                 auto id2 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, id, false));
 
                 auto val = llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block);
-                values.push_back({val, val->getType()});
+                values.push_back({val, LlvmType(val->getType())});
             }
 
             return ValuePackH(values);
@@ -199,7 +211,7 @@ Value tupleValue(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeG
 
 llvm::Value *Value::V::load(CodeGenContext &ctx) const
 {
-    return ctx.convertTo(value, type);
+    return ctx.convertTo(value, type.get(ctx));
 }
 
 void Value::setMutable(bool m)
