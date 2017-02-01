@@ -50,6 +50,12 @@ std::string TypeConstraint::name() const
             case Operator::Lesser:
                 n += "< ";
                 break;
+            case Operator::GreaterEqual:
+                n += ">= ";
+                break;
+            case Operator::LesserEqual:
+                n += "<= ";
+                break;
         }
         n += std::to_string(c.value);
     }
@@ -73,6 +79,14 @@ bool TypeConstraint::isCompatibleWith(const TypeConstraint &c) const
             case Operator::Lesser:
                 return (c1.op == Operator::Equal && c1.value < c2.value) ||
                        (c1.op == Operator::Lesser && c1.value <= c2.value);
+            case Operator::GreaterEqual:
+                return (c1.op == Operator::Equal && c1.value >= c2.value) ||
+                       (c1.op == Operator::Greater && c1.value >= c2.value) ||
+                       (c1.op == Operator::GreaterEqual && c1.value >= c2.value);
+            case Operator::LesserEqual:
+                return (c1.op == Operator::Equal && c1.value <= c2.value) ||
+                       (c1.op == Operator::Lesser && c1.value <= c2.value) ||
+                       (c1.op == Operator::LesserEqual && c1.value <= c2.value);
         }
         return false;
     };
@@ -139,6 +153,20 @@ llvm::Type *IntegerType::get(CodeGenContext &ctx) const
 std::string IntegerType::name() const
 {
     return std::string(m_signed ? "i" : "u") + std::to_string(m_bits);
+}
+
+long long IntegerType::maxValue() const
+{
+    int shifts = m_bits - m_signed * 1;
+    return (1 << shifts) - 1;
+}
+
+long long IntegerType::minValue() const
+{
+    if (m_signed) {
+        return - (1 << m_bits);
+    }
+    return 0;
 }
 
 

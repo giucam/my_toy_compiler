@@ -101,7 +101,7 @@ func main(): i32 {
     gg = 0;
 //     doo(gg);
     let sss: S1 = { f = 3 };
-    let bla: foo = { ddd = 3, pupu = 9, s1 = sss };
+    let bla: foo = { ddd = gg, pupu = 9, s1 = sss };
 //     let bla2: foo = { ddd = 3, pupu = 9, s1 = &sss };
 
 let mut bb = &bla;

@@ -22,6 +22,8 @@ public:
         NotEqual,
         Greater,
         Lesser,
+        GreaterEqual,
+        LesserEqual,
     };
     TypeConstraint();
     TypeConstraint(Operator op, int v);
@@ -101,6 +103,9 @@ public:
 
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
+
+    long long maxValue() const;
+    long long minValue() const;
 
 private:
     bool m_signed;

@@ -684,15 +684,31 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
     }
 
     size_t i = 0;
+    auto info = context.functionInfo(function);
     for (auto &&arg: function->getArgumentList()) {
         auto argTy = arg.getType();
 
         auto converted = context.convertTo(values[i].value, argTy);
+        if (info && !converted) {
+            if (argTy->isIntegerTy() && values[i].value->getType()->isIntegerTy()) {
+                auto intTy = info->argTypes[i].getSpecialization<IntegerType>();
+
+                int max = intTy->maxValue();
+                int min = intTy->minValue();
+                TypeConstraint constraint;
+                constraint.addConstraint(TypeConstraint::Operator::LesserEqual, max);
+                constraint.addConstraint(TypeConstraint::Operator::GreaterEqual, min);
+                if (values[i].type.typeConstraint().isCompatibleWith(constraint)) {
+                    converted = new llvm::TruncInst(values[i].value, argTy, "", context.currentBlock()->block);
+                } else {
+                    err(token(), "cannot truncate from type '{}' to type '{}': value must be between {} and {}",  values[i].type.name(), info->argTypes[i].name(), min, max);
+                }
+            }
+        }
         if (!converted) {
             err(token(), "wrong argument type to function; expected '{}', found '{}'", typeName(argTy), typeName(values[i].value->getType()));
         }
 
-        auto info = context.functionInfo(function);
         if (info) {
             canStoreInto(token(), context, info->argTypes[i], values[i].type);
         }
@@ -906,7 +922,13 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
         auto v = value.extract(f.name);
         auto src = f.init->codeGen(ctx);
 
-        new llvm::StoreInst(src->unpack()[0].value, v.value, false, ctx.currentBlock()->block);
+        auto srcValue = src->unpack()[0].value;
+        srcValue = ctx.convertTo(srcValue, v.type.get(ctx));
+        if (!srcValue) {
+            err(token, "cannot store a value of type '{}' into a value of type '{}'", src->unpack()[0].type.name(), v.type.name());
+        }
+
+        new llvm::StoreInst(srcValue, v.value, false, ctx.currentBlock()->block);
     }
 
     return value;
@@ -976,7 +998,12 @@ Optional<Value> NExternDeclaration::codeGen(CodeGenContext &context)
         argTypes.push_back(arg.type().get(context));
     }
     llvm::FunctionType *ftype = llvm::FunctionType::get(returnType().get(context), llvm::makeArrayRef(argTypes), isVarargs());
-    llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, name().c_str(), &context.module());
+    auto function = llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, name().c_str(), &context.module());
+
+    auto info = context.addFunctionInfo(function);
+    for (auto &&arg: m_arguments) {
+        info->argTypes.push_back(arg.type());
+    }
 
     return {};
 }
