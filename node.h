@@ -465,4 +465,23 @@ private:
     NBlock *m_block;
 };
 
+class NEnumDeclaration : public NStatement
+{
+public:
+    struct Entry {
+        const std::string name;
+        long long int value;
+    };
+
+    NEnumDeclaration(const std::string &name, const Type &type, std::vector<Entry> &entries)
+        : m_name(name), m_type(type) { std::swap(entries, m_entries); }
+
+    Optional<Value> codeGen(CodeGenContext &context) override;
+
+private:
+    std::string m_name;
+    Type m_type;
+    std::vector<Entry> m_entries;
+};
+
 #endif

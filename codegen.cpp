@@ -328,9 +328,11 @@ llvm::Type *CodeGenContext::declaredType(const std::string &name) const
 
 /* -- Code Generation -- */
 
-Value constantInteger(CodeGenContext &ctx, int val)
+Value constantInteger(CodeGenContext &ctx, int val, Type t = {})
 {
-    Type t = IntegerType(true, 32);
+    if (!t.isValid()) {
+        t = IntegerType(true, 32);
+    }
     t.setTypeConstraint(TypeConstraint(TypeConstraint::Operator::Equal, val));
     return simpleValue(llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.context()), val, true), t);
 }
@@ -1281,4 +1283,47 @@ Optional<Value> NExternVariableDeclaration::codeGen(CodeGenContext &ctx)
     auto value = simpleValue(val, LlvmType(val->getType()));
     ctx.storeGlobal(name(), value);
     return value;
+}
+
+Optional<Value> NEnumDeclaration::codeGen(CodeGenContext &ctx)
+{
+    class EnumValue
+    {
+    public:
+        std::vector<Value::V> values;
+        std::unordered_map<std::string, int> names;
+
+        EnumValue(CodeGenContext &ctx, NEnumDeclaration *decl)
+        {
+            int i = 0;
+            for (auto &&e: decl->m_entries) {
+                values.push_back({ llvm::ConstantInt::get(decl->m_type.get(ctx), e.value, true), decl->m_type });
+                names[e.name] = i++;
+            }
+        }
+
+        const std::vector<Value::V> &unpack() const { return values; }
+        std::vector<Value::V> &unpack() { return values; }
+        Value::V extract(int id) const { return values[id]; }
+        Value::V extract(const std::string &name) const
+        {
+            auto id = names.find(name)->second;
+            return values[id];
+        }
+        EnumValue clone(std::vector<Value::V> &values) const
+        {
+            return *this;
+        }
+
+    };
+
+    if (m_name.empty()) {
+        for (auto &&e: m_entries) {
+            ctx.storeGlobal(e.name, constantInteger(ctx, e.value, m_type));
+        }
+    } else {
+        ctx.storeGlobal(m_name, EnumValue(ctx, this));
+    }
+
+    return {};
 }

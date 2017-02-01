@@ -92,7 +92,7 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
 
 std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
 {
-        auto parseExpressionList = [&]() {
+    auto parseExpressionList = [&]() {
         checkTokenType(nextToken(), Token::Type::LeftParens);
 
         ExpressionList list;
@@ -110,19 +110,18 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
 
     auto tok = m_lexer.peekToken();
 
+    std::unique_ptr<NExpression> expression;
+
     if (tok.type() == Token::Type::Identifier || (tok.type() == Token::Type::Numeric && context)) {
         nextToken();
         if (m_lexer.peekToken().type() == Token::Type::LeftParens) {
             ExpressionList list = parseExpressionList();
-            auto ex = std::make_unique<NMethodCall>(tok, tok.text(), list);
-            ex->pushContext(context);
-
-            return ex;
+            expression = std::make_unique<NMethodCall>(tok, tok.text(), list);
+        } else if (tok.type() == Token::Type::Numeric) {
+            expression = std::make_unique<NIdentifier>(tok, std::stol(tok.text()));
+        } else {
+            expression = std::make_unique<NIdentifier>(tok, tok.text());
         }
-        if (tok.type() == Token::Type::Numeric) {
-            return std::make_unique<NIdentifier>(tok, std::stol(tok.text()));
-        }
-        return std::make_unique<NIdentifier>(tok, tok.text());
     } else if (tok.type() == Token::Type::Numeric) {
         nextToken();
 
@@ -159,25 +158,28 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
         nextToken();
         return std::make_unique<NBoolean>(tok, false);
     }
-    return nullptr;
+
+    if (expression) {
+        expression->pushContext(context);
+        if (m_lexer.peekToken().type() == Token::Type::Dot) {
+            nextToken();
+
+            auto ex = parsePrimary(expression.get());
+            ex->attach(std::move(expression));
+            return ex;
+        }
+        return expression;
+    }
+
+    return expression;
 }
 
 std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
 {
     auto expr = parsePrimary(context);
     if (expr) {
-        expr->pushContext(context);
-
         auto peekType = m_lexer.peekToken().type();
         switch (peekType) {
-            case Token::Type::Dot: {
-                nextToken();
-
-                auto ex = parseExpression(expr.get());
-                ex->attach(std::move(expr));
-                expr = std::move(ex);
-                break;
-            }
             case Token::Type::Equal: {
                 auto tok = nextToken();
 

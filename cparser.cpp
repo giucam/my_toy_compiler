@@ -322,7 +322,32 @@ void CParser::parseEnum(CXCursor c)
     auto underlying = clang_getEnumDeclIntegerType(c);
     auto utype = parseType(underlying, c);
 
+    auto name = getCString(clang_getTypeSpelling(type));
+    //check if the enum is anonymous. clang_Cursor_isAnonymous() does not work for enums
+    if (strncmp(name.c_str(), "enum (anonymous at", 18) == 0) {
+        name.clear();
+    }
+
     m_types.insert(std::make_pair(type, utype));
+
+    struct ParseContext {
+        std::vector<NEnumDeclaration::Entry> entries;
+    } context;
+
+    clang_visitChildren(c, [](CXCursor c, CXCursor parent, CXClientData client_data) {
+        auto ctx = static_cast<ParseContext *>(client_data);
+        auto kind = clang_getCursorKind(c);
+
+        if (kind == CXCursor_EnumConstantDecl) {
+            ctx->entries.push_back({ getCString(clang_getCursorSpelling(c)), clang_getEnumConstantDeclValue(c) });
+            return CXChildVisit_Continue;
+        }
+
+        return CXChildVisit_Recurse;
+    }, &context);
+
+    auto decl = new NEnumDeclaration(name, utype, context.entries);
+    m_block->statements.push_back(decl);
 }
 
 std::vector<std::string> CParser::parse(NBlock *root)
