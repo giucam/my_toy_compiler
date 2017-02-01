@@ -67,6 +67,16 @@ struct StructInfo {
     std::vector<FieldInfo> fields;
 };
 
+struct UnionInfo {
+    llvm::Type *type;
+    struct FieldInfo {
+        std::string name;
+        bool mut;
+        Type type;
+    };
+    std::vector<FieldInfo> fields;
+};
+
 struct TupleInfo {
     llvm::Type *type;
 };
@@ -90,6 +100,10 @@ public:
     const StructInfo *structInfo(llvm::Type *type) const;
     const StructInfo *structInfo(const std::string &name) const;
     StructInfo *newStructType(llvm::StructType *type);
+
+    const UnionInfo *unionInfo(llvm::Type *type) const;
+    const UnionInfo *unionInfo(const std::string &name) const;
+    UnionInfo *newUnionType(llvm::StructType *type);
 
     llvm::StructType *tupleType(const std::vector<llvm::Type *> &argTypes);
     llvm::Value *makeTupleValue(const std::vector<llvm::Value *> &values, const std::string &name);
@@ -137,6 +151,8 @@ private:
     std::unique_ptr<llvm::Module> m_module;
     std::unordered_map<std::string, StructInfo> m_structInfo;
     std::unordered_map<llvm::Type *, StructInfo *> m_structInfoByType;
+    std::unordered_map<std::string, UnionInfo> m_unionInfo;
+    std::unordered_map<llvm::Type *, UnionInfo *> m_unionInfoByType;
     std::unordered_map<std::string, llvm::StructType *> m_tupleTypes;
     std::unordered_map<llvm::Type *, TupleInfo> m_tupleInfo;
     std::unordered_map<std::string, NIfacePrototype *> m_ifacePrototypes;

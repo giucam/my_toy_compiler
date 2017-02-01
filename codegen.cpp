@@ -153,6 +153,35 @@ StructInfo *CodeGenContext::newStructType(llvm::StructType *type)
     return info;
 }
 
+const UnionInfo *CodeGenContext::unionInfo(llvm::Type *type) const
+{
+    if (!type->isStructTy()) {
+        return nullptr;
+    }
+
+    auto it = m_unionInfoByType.find(type);
+    if (it != m_unionInfoByType.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+const UnionInfo *CodeGenContext::unionInfo(const std::string &name) const
+{
+    auto it = m_unionInfo.find(name);
+    if (it != m_unionInfo.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
+UnionInfo *CodeGenContext::newUnionType(llvm::StructType *type)
+{
+    auto info = &m_unionInfo[type->getName()];
+    m_unionInfoByType[type] = info;
+    return info;
+}
+
 const TupleInfo *CodeGenContext::tupleInfo(llvm::Type *type) const
 {
     if (!type->isStructTy()) {
@@ -362,6 +391,8 @@ static Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &va
             return structValue({}, value, valueType.get(ctx), info, ctx);
         } else if (auto info = ctx.tupleInfo(type)) {
             return tupleValue({}, value, valueType.get(ctx), info, ctx);
+        } else if (auto info = ctx.unionInfo(type)) {
+            return unionValue({}, value, valueType.get(ctx), info, ctx);
         }
     }
     return simpleValue(value, valueType);
@@ -849,8 +880,12 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
 Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
 {
     auto t = type.get(ctx);
-    auto info = ctx.structInfo(t);
-    if (!info) {
+    size_t numFields = 0;
+    if (auto info = ctx.structInfo(t)) {
+        numFields = info->fields.size();
+    } else if (auto i = ctx.unionInfo(t)) {
+        numFields = i->fields.size();
+    } else {
         error("boo {}", name);
     }
 
@@ -861,7 +896,7 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
         return value;
     }
 
-    if (fields.size() != info->fields.size()) {
+    if (fields.size() != numFields) {
         err(token, "wrong number of initializers passed when declaring variable of type '{}'", name, type.name());
     }
 
@@ -1087,11 +1122,11 @@ Optional<Value> NUnionDeclaration::codeGen(CodeGenContext &context)
 
     auto type = static_cast<llvm::StructType *>(m_type.get(context));
     type->setBody(argTypes);
-    auto info = context.newStructType(type);
+    auto info = context.newUnionType(type);
     info->type = type;
     info->fields.reserve(elements.size());
     for (auto &&el: elements) {
-        info->fields.push_back({ el.name, el.mut });
+        info->fields.push_back({ el.name, el.mut, el.type });
     }
     return {};
 }

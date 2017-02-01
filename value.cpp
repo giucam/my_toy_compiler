@@ -148,6 +148,68 @@ Value structValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const Str
     return Value(std::move(h));
 }
 
+Value unionValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const UnionInfo *i, CodeGenContext &c)
+{
+    struct UnionValue
+    {
+        UnionValue(llvm::Value *alloc, llvm::Type *type, const UnionInfo *i, CodeGenContext &c)
+            : value({{alloc, LlvmType(type), true}}), info(i), ctx(c)
+        {
+        }
+
+        const std::vector<Value::V> &unpack() const
+        {
+            return value;
+        }
+        std::vector<Value::V> &unpack()
+        {
+            return value;
+        }
+        Value::V extract(int id) const
+        {
+            if (id < 0 || id >= (int)info->fields.size()) {
+                throw OutOfRangeException(typeName(info->type), info->fields.size());
+            }
+
+            auto v = value[0].value;
+            while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
+                v = new llvm::LoadInst(v, "", false, ctx.currentBlock()->block);
+            }
+
+            bool mut = info->fields[id].mut;
+            auto type = info->fields[id].type.get(ctx)->getPointerTo();
+
+            return { new llvm::BitCastInst(v, type, "", ctx.currentBlock()->block), info->fields[id].type, mut };
+
+
+        }
+        Value::V extract(const std::string &name) const
+        {
+            int id = -1;
+            for (size_t i = 0; i < info->fields.size(); ++i) {
+                if (info->fields[i].name == name) {
+                    id = i;
+                    break;
+                }
+            }
+            if (id == -1) {
+                throw InvalidFieldException(typeName(info->type));
+            }
+            return extract(id);
+        }
+        UnionValue clone(std::vector<Value::V> &values) const
+        {
+            return UnionValue(values[0].value, values[0].type.get(ctx), info, ctx);
+        }
+
+        std::vector<Value::V> value;
+        const UnionInfo *info;
+        CodeGenContext &ctx;
+    };
+    UnionValue h(alloc, type, i, c);
+    return Value(std::move(h));
+}
+
 Value tupleValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
 {
     struct TupleValueH

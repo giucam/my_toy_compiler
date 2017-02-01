@@ -16,6 +16,7 @@ namespace llvm {
 class CodeGenContext;
 class StructInfo;
 class TupleInfo;
+class UnionInfo;
 
 class OutOfRangeException
 {
@@ -99,6 +100,7 @@ private:
 Value simpleValue(llvm::Value *val, const Type &type);
 Value valuePack(std::vector<Value::V> &vec);
 Value structValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c);
+Value unionValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const UnionInfo *i, CodeGenContext &c);
 Value tupleValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c);
 
 #endif
