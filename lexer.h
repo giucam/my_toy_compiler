@@ -133,6 +133,8 @@ class Lexer
 public:
     Lexer(const std::string &filename);
 
+    void reset();
+
     Token peekToken(int advance = 1);
     Token nextToken();
 

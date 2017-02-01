@@ -49,11 +49,11 @@ class Type
         virtual ~IfaceBase() {}
         virtual llvm::Type *get(CodeGenContext &ctx) const = 0;
         virtual std::string name() const = 0;
-        void *magic;
+        void (*magic)();
     };
     template<class T>
     struct Iface : IfaceBase {
-        Iface(T d) : data(std::move(d)) { magic = T::magic(); }
+        Iface(T d) : data(std::move(d)) { magic = T::magic; }
         llvm::Type *get(CodeGenContext &ctx) const override { return data.get(ctx); }
         std::string name() const override { return data.name(); }
         T data;
@@ -75,7 +75,7 @@ public:
     template<class T>
     const T *getSpecialization() const
     {
-        if (T::magic() == m_iface->magic) {
+        if (T::magic == m_iface->magic) {
             return &static_cast<const Iface<T> *>(m_iface.get())->data;
         }
         return nullptr;
@@ -90,7 +90,7 @@ private:
     TypeConstraint m_constraint;
 };
 #define TYPE_SPECIALIZATION \
-static void *magic() { static int a; return &a; } \
+static void magic() { } \
 friend class Type;
 
 class IntegerType

@@ -370,10 +370,11 @@ public:
     std::string id;
     std::vector<Field> elements;
     Type m_type;
+    bool m_hasBody;
     NStructDeclaration(const std::string &id);
 
     const Type &type() const { return m_type; }
-    void setFields(std::vector<Field> &e) { std::swap(e, elements); }
+    void setFields(std::vector<Field> &e) { std::swap(e, elements); m_hasBody = true; }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };

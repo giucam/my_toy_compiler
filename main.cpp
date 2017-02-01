@@ -7,6 +7,7 @@
 #include "node.h"
 #include "parser.h"
 #include "common.h"
+#include "cparser.h"
 
 using namespace std;
 
@@ -60,6 +61,42 @@ static bool checkOption(char **argv, int &i, int argc, const char *option, std::
     return false;
 }
 
+static void parseCImports(std::vector<Import> &imports, NBlock *block)
+{
+    char name[32];
+    strcpy(name, "/tmp/XXXXXX.c");
+    auto fd = mkstemps(name, 2);
+
+    for (auto &&i: imports) {
+        if (i.lang == Import::Lang::C) {
+            fmt::print("INCLUDING {}\n", i.file);
+            write(fd, "#include <", 10);
+            write(fd, i.file.c_str(), i.file.size());
+            write(fd, ">\n", 2);
+        }
+    }
+
+    char buf[256];
+    auto s = readlink((std::string("/proc/self/fd/") + std::to_string(fd)).c_str(), buf, 256);
+    buf[s] = '\0';
+
+    CParser parser(buf);
+    parser.parse(block);
+
+    close(fd);
+    unlink(buf);
+}
+
+static void parseNativeImports(std::vector<Import> &imports, NBlock *block)
+{
+    for (auto &&i: imports) {
+        if (i.lang == Import::Lang::Native) {
+            Parser p(i.file);
+            p.parse(block, true);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -88,6 +125,13 @@ int main(int argc, char **argv)
         NBlock programBlock;
 
         Parser parser(file);
+
+        std::vector<Import> imports;
+        parser.parseImports(imports);
+
+        parseCImports(imports, &programBlock);
+        parseNativeImports(imports, &programBlock);
+
         parser.parse(&programBlock, false);
 
         CodeGenContext context(file);

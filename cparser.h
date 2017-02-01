@@ -10,6 +10,7 @@
 #include "node.h"
 
 class NBlock;
+class NStructDeclaration;
 
 namespace std {
 template<>
@@ -31,19 +32,21 @@ class CParser
 public:
     CParser(const std::string &filename);
 
-    void parse(NBlock *rootBlock);
+    std::vector<std::string> parse(NBlock *rootBlock);
 
 private:
-    Type parseType(CXType type);
+    Type parseType(CXType type, CXCursor cursor);
     void parseStruct(CXCursor c);
     void parseUnion(CXCursor c);
     void parseFunction(CXCursor c);
     void parseTypedef(CXCursor c);
     void parseVariable(CXCursor c);
+    void parseEnum(CXCursor c);
 
     std::string m_filename;
     NBlock *m_block;
     std::unordered_map<CXType, Type> m_types;
+    std::unordered_map<CXType, NStructDeclaration *> m_structs;
 };
 
 

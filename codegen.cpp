@@ -137,6 +137,15 @@ const StructInfo *CodeGenContext::structInfo(llvm::Type *type) const
     return nullptr;
 }
 
+const StructInfo *CodeGenContext::structInfo(const std::string &name) const
+{
+    auto it = m_structInfo.find(name);
+    if (it != m_structInfo.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
 StructInfo *CodeGenContext::newStructType(llvm::StructType *type)
 {
     auto info = &m_structInfo[type->getName()];
@@ -268,6 +277,25 @@ llvm::Value *CodeGenContext::allocate(llvm::Type *type, const std::string &name,
     new llvm::StoreInst(val, alloc, false, currentBlock()->block);
     return alloc;
 }
+
+bool CodeGenContext::addDeclaredType(const std::string &name, llvm::Type *type)
+{
+    if (m_declaredTypes.find(name) != m_declaredTypes.end()) {
+        return false;
+    }
+    m_declaredTypes.insert(std::make_pair(name, type));
+    return true;
+}
+
+llvm::Type *CodeGenContext::declaredType(const std::string &name) const
+{
+    auto it = m_declaredTypes.find(name);
+    if (it == m_declaredTypes.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
 
 /* -- Code Generation -- */
 
@@ -823,16 +851,19 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
     auto t = type.get(ctx);
     auto info = ctx.structInfo(t);
     if (!info) {
-        error("boo");
+        error("boo {}", name);
     }
 
     llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+    auto value = createValue(ctx, alloc, type);
+
+    if (fields.empty()) {
+        return value;
+    }
 
     if (fields.size() != info->fields.size()) {
         err(token, "wrong number of initializers passed when declaring variable of type '{}'", name, type.name());
     }
-
-    auto value = createValue(ctx, alloc, type);
 
     for (auto &&f: fields) {
         auto v = value.extract(f.name);
@@ -973,7 +1004,14 @@ public:
     llvm::Type *get(CodeGenContext &context) const
     {
         if (!m_type) {
-            m_type = llvm::StructType::create(context.context(), m_name.c_str());
+            if (auto t = context.declaredType(m_name)) {
+                m_type = t;
+            }
+            if (!m_type) {
+                fmt::print("CREATE TYPE {}\n",m_name);
+                m_type = llvm::StructType::create(context.context(), m_name.c_str());
+                context.addDeclaredType(m_name, m_type);
+            }
         }
         return m_type;
     }
@@ -986,23 +1024,28 @@ public:
 NStructDeclaration::NStructDeclaration(const std::string &id)
                   : id(id)
                   , m_type(StructType(id))
+                  , m_hasBody(false)
 {
 }
 
 Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
 {
     auto type = static_cast<llvm::StructType *>(m_type.get(context));
-    if (!type->isOpaque()) {
+    if (!m_hasBody) {
         return {};
     }
 
-    std::cout << "Creating struct declaration " << " " << id << " "<<this<<'\n';
+    std::cout << "Creating struct declaration " << id << '\n';
+
+    if (context.structInfo(id)) {
+        err(token(), "struct '{}' was already declared", id);
+    }
 
     std::vector<llvm::Type *> argTypes;
     for (auto it = elements.begin(); it != elements.end(); it++) {
         auto t = it->type;
         argTypes.push_back(t.get(context));
-//         std::cout<<"    with arg " << it->type->name() << " " <<it->name<<"\n";
+        std::cout<<"    with arg " << it->type.name() << " " <<it->name<<"\n";
     }
     type->setBody(argTypes);
 
@@ -1024,13 +1067,23 @@ NUnionDeclaration::NUnionDeclaration(const std::string &id, std::vector<Field> &
 
 Optional<Value> NUnionDeclaration::codeGen(CodeGenContext &context)
 {
-    std::cout << "Creating struct declaration " << " " << id << '\n';
+    std::cout << "Creating union declaration " << " " << id << '\n';
     std::vector<llvm::Type *> argTypes;
+    int size = 0;
+    llvm::Type *argType = nullptr;
+    llvm::DataLayout layout(&context.module());
     for (auto it = elements.begin(); it != elements.end(); it++) {
-        argTypes.push_back(it->type.get(context));
-        break;
-//         std::cout<<"    with arg " << it->type->name() << " " <<it->name<<"\n";
+        auto t = it->type.get(context);
+        if (t->isSized()) {
+            int s = layout.getTypeSizeInBits(t);
+            if (s > size) {
+                size = s;
+                argType = t;
+            }
+        }
     }
+
+    argTypes.push_back(argType);
 
     auto type = static_cast<llvm::StructType *>(m_type.get(context));
     type->setBody(argTypes);
@@ -1185,6 +1238,9 @@ Optional<Value> NWhileStatement::codeGen(CodeGenContext &ctx)
 
 Optional<Value> NExternVariableDeclaration::codeGen(CodeGenContext &ctx)
 {
+    if (auto v = ctx.global(name())) {
+        return v;
+    }
     auto ty = type().get(ctx);
     auto val = new llvm::GlobalVariable(ctx.module(), ty, false, llvm::GlobalValue::ExternalLinkage, nullptr, name().c_str());
     auto value = simpleValue(val, LlvmType(val->getType()));

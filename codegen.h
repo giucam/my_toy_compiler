@@ -88,6 +88,7 @@ public:
     llvm::Type *typeOf(const std::string &name);
 
     const StructInfo *structInfo(llvm::Type *type) const;
+    const StructInfo *structInfo(const std::string &name) const;
     StructInfo *newStructType(llvm::StructType *type);
 
     llvm::StructType *tupleType(const std::vector<llvm::Type *> &argTypes);
@@ -124,6 +125,9 @@ public:
 
     llvm::Value *allocate(llvm::Type *type, const std::string &name, llvm::Value *toStore);
 
+    bool addDeclaredType(const std::string &name, llvm::Type *type);
+    llvm::Type *declaredType(const std::string &name) const;
+
 private:
     llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<Value::V> &values);
 
@@ -141,6 +145,7 @@ private:
     std::unordered_map<std::string, llvm::Function *> m_concreteTemplates;
     std::unordered_map<std::string, Value> m_globals;
     std::unordered_map<llvm::Function *, FunctionInfo> m_functionInfo;
+    std::unordered_map<std::string, llvm::Type *> m_declaredTypes;
 };
 
 std::string typeName(llvm::Type *ty);

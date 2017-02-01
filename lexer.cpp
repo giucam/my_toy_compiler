@@ -29,6 +29,17 @@ Lexer::Lexer(const std::string &filename)
 
 }
 
+void Lexer::reset()
+{
+    m_colno = 0;
+    m_lineno = 0;
+    m_lastChar = ' ';
+    m_readTokens.clear();
+    m_stream.clear();
+    m_stream.seekg(0, m_stream.beg);
+    m_line.clear();
+}
+
 int Lexer::nextChar()
 {
     if (m_colno >= (int)m_line.size()) {

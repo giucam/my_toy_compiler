@@ -9,12 +9,24 @@
 
 class NBlock;
 
+class Import
+{
+public:
+    enum class Lang {
+        Native,
+        C,
+    };
+    Lang lang;
+    std::string file;
+};
+
 class Parser
 {
 public:
     Parser(const std::string &filename);
 
-    void parse(NBlock *rootBlock, bool declarationsOnly);
+    void parse(NBlock *rootBlock, bool importing);
+    void parseImports(std::vector<Import> &imports);
 
 private:
     Token nextToken(Token::Type expected);
@@ -37,12 +49,13 @@ private:
     Type parseType();
     void parseIf();
     void parseWhile();
-    void parseImport();
+    void parseImport(std::vector<Import> &imports);
+    void dummyParseImport();
 
     std::string m_filename;
     Lexer m_lexer;
     NBlock *m_block;
-    bool m_declarationsOnly;
+    bool m_importing;
 };
 
 #endif

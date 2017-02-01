@@ -145,13 +145,18 @@ std::string IntegerType::name() const
 llvm::Type *FloatingType::get(CodeGenContext &ctx) const
 {
     switch (m_bits) {
+        case 16:
+            return llvm::Type::getHalfTy(ctx.context());
         case 32:
             return llvm::Type::getFloatTy(ctx.context());
         case 64:
             return llvm::Type::getDoubleTy(ctx.context());
+        case 128:
+            return llvm::Type::getFP128Ty(ctx.context());
         default:
             break;
     }
+    error("unsupported bits size for floating point type: {}", m_bits);
     return nullptr;
 }
 
@@ -187,7 +192,7 @@ std::string FunctionPointerType::name() const
     std::string n("func (");
     int i = 0;
     for (auto &&a: m_args) {
-        if (i > 0) {
+        if (i++ > 0) {
             n += ", ";
         }
         n += a.name();
@@ -247,7 +252,7 @@ std::string TupleType::name() const
 
 llvm::Type *CustomType::get(CodeGenContext &ctx) const
 {
-    auto t = ctx.typeOf(m_name);
+    auto t = ctx.declaredType(m_name);
     if (!t) {
         err(m_token, "type '{}' was not declared in this scope", m_name);
     }

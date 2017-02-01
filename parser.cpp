@@ -1,4 +1,7 @@
 
+#include <unistd.h>
+#include <fcntl.h>
+
 #include <memory>
 
 #include "parser.h"
@@ -463,24 +466,55 @@ void Parser::parseWhile()
     m_block->statements.push_back(stmt);
 }
 
-void Parser::parseImport()
+void Parser::parseImport(std::vector<Import> &imports)
 {
     nextToken(Token::Type::Import);
 
     auto tok = nextToken(Token::Type::StringLiteral);
-    if (m_lexer.peekToken().type() == Token::Type::Semicolon) {
-        Parser child(tok.text());
-        child.parse(m_block, true);
+    auto peek = m_lexer.peekToken();
+    Import::Lang lang;
+    if (peek.type() == Token::Type::Semicolon) {
+        lang = Import::Lang::Native;
     } else {
-        auto fileTok = nextToken(Token::Type::StringLiteral);
-
         if (tok.text() == "C") {
-            CParser child(fileTok.text());
-            child.parse(m_block);
+            lang = Import::Lang::C;
         } else {
             err(tok, "unknown language '{}'", tok.text());
         }
+
+        tok = nextToken(Token::Type::StringLiteral);
     }
+
+    checkTokenType(tok, Token::Type::StringLiteral);
+    auto file = tok.text();
+    nextToken(Token::Type::Semicolon);
+
+    switch (lang) {
+        case Import::Lang::Native: {
+            imports.push_back({ Import::Lang::Native, file });
+            Parser parser(file);
+            parser.parseImports(imports);
+            break;
+        }
+        case Import::Lang::C: {
+            imports.push_back({ Import::Lang::C, file });
+            break;
+        }
+    }
+}
+
+void Parser::dummyParseImport()
+{
+    nextToken(Token::Type::Import);
+
+    auto tok = nextToken(Token::Type::StringLiteral);
+    auto peek = m_lexer.peekToken();
+    if (peek.type() == Token::Type::Semicolon) {
+    } else {
+        tok = nextToken(Token::Type::StringLiteral);
+    }
+
+    checkTokenType(tok, Token::Type::StringLiteral);
     nextToken(Token::Type::Semicolon);
 }
 
@@ -525,7 +559,7 @@ void Parser::parseStatements()
             parseWhile();
             break;
         case Token::Type::Import:
-            parseImport();
+            dummyParseImport();
             break;
         case Token::Type::RightBrace:
             fmt::print("br\n");
@@ -754,7 +788,7 @@ NFunctionDeclaration *Parser::parseFunc()
     auto retType = parseType();
 
     auto block = parseBlock();
-    if (m_declarationsOnly && !isTemplate) {
+    if (m_importing && !isTemplate) {
         delete block;
         block = nullptr;
     }
@@ -763,9 +797,32 @@ NFunctionDeclaration *Parser::parseFunc()
     return decl;
 }
 
-void Parser::parse(NBlock *root, bool declarationsOnly)
+void Parser::parse(NBlock *root, bool importing)
 {
-    m_declarationsOnly = declarationsOnly;
+    m_lexer.reset();
+
+    m_importing = importing;;
     m_block = root;
     parseStatements();
+}
+
+void Parser::parseImports(std::vector<Import> &imports)
+{
+    m_lexer.reset();
+
+    bool eof = false;
+    while (!eof) {
+        auto tok = m_lexer.peekToken();
+        switch (tok.type()) {
+        case Token::Type::EOF:
+            eof = true;
+            break;
+        case Token::Type::Import:
+            parseImport(imports);
+            break;
+        default:
+            nextToken();
+            break;
+        }
+    }
 }
