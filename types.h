@@ -192,6 +192,8 @@ class TupleType
 public:
     TupleType(std::vector<Type> &types) { std::swap(types, m_types); }
 
+    const std::vector<Type> &unpack() const { return m_types; }
+
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 

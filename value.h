@@ -34,37 +34,21 @@ public:
     std::string type;
 };
 
-class Value {
-public:
-    struct V {
-        llvm::Value *value;
-        Type type;
-        bool mut;
+class ValueSpecialization;
 
-        llvm::Value *load(CodeGenContext &ctx) const;
-    };
-
-private:
+class Value
+{
     struct IfaceBase
     {
         virtual ~IfaceBase() {}
-
-        virtual const std::vector<Value::V> &unpack() const = 0;
-        virtual std::vector<Value::V> &unpack() = 0;
-        virtual Value::V extract(int id) const = 0;
-        virtual Value::V extract(const std::string &name) const = 0;
-
-        virtual std::shared_ptr<IfaceBase> clone(std::vector<V> &values) const = 0;
+        virtual Type &type() = 0;
+        ValueSpecialization *handlerBase;
     };
     template<class T>
     struct Iface : IfaceBase
     {
-        Iface(T h) : handler(std::move(h)) {}
-        const std::vector<Value::V> &unpack() const override { return handler.unpack(); }
-        std::vector<Value::V> &unpack() override { return handler.unpack(); }
-        Value::V extract(int id) const override { return handler.extract(id); }
-        Value::V extract(const std::string &name) const override { return handler.extract(name); }
-        std::shared_ptr<IfaceBase> clone(std::vector<V> &values) const override { auto clone = handler.clone(values); return std::make_shared<Iface<decltype(clone)>>(clone); }
+        Iface(T h) : handler(std::move(h)) { handlerBase = &handler; }
+        Type &type() override { return handler.type(); }
         T handler;
     };
 
@@ -82,25 +66,130 @@ public:
     Value(const std::shared_ptr<IfaceBase> &iface, Flags flags = Flags::None)
         : m_iface(iface), m_flags((int)flags) {}
 
-    inline const std::vector<V> &unpack() const { return m_iface->unpack(); }
-    inline std::vector<V> &unpack() { return m_iface->unpack(); }
-    inline Value::V extract(int id) const { return m_iface->extract(id); }
-    inline Value::V extract(const std::string &name) const { return m_iface->extract(name); }
-
-    Value clone(std::vector<V> &values) const { return Value(m_iface->clone(values)); }
-
     void setMutable(bool m);
     bool isMutable() const { return m_flags & (int)Flags::Mutable; }
+
+    inline Type &type() { return m_iface->type(); }
+
+    template<class T>
+    T *getSpecialization() const
+    {
+        if (!m_iface) {
+            return nullptr;
+        }
+        return dynamic_cast<T *>(m_iface->handlerBase);
+    }
 
 private:
     std::shared_ptr<IfaceBase> m_iface;
     int m_flags;
 };
 
+#define VALUE_SPECIALIZATION \
+static void magic() { } \
+friend class Value;
+
+class ValueSpecialization
+{
+public:
+    virtual ~ValueSpecialization() {}
+};
+
+class FirstClassValue : public ValueSpecialization
+{
+public:
+    FirstClassValue(llvm::Value *v, const Type &t) : m_value(v), m_type(t) {}
+
+    llvm::Value *value() const { return m_value; }
+    Type &type() { return m_type; }
+
+    llvm::Value *load(CodeGenContext &ctx) const;
+
+private:
+    llvm::Value *m_value;
+    Type m_type;
+};
+
+class AggregateValue
+{
+public:
+    virtual Value extract(int id) const = 0;
+};
+
+class NamedAggregateValue : public AggregateValue
+{
+public:
+    virtual Value extract(const std::string &name) const = 0;
+};
+
+class PackValue : public AggregateValue
+{
+public:
+    virtual const std::vector<Value> &unpack() const = 0;
+};
+
+class TupleValue : public ValueSpecialization, public PackValue
+{
+public:
+    TupleValue(std::vector<Value> &values);
+
+    Type &type();
+
+    const std::vector<Value> &unpack() const override { return m_values; }
+    Value extract(int id) const override;
+
+private:
+    std::vector<Value> m_values;
+    Type m_type;
+};
+
+class TupleValueH : public FirstClassValue, public PackValue
+{
+public:
+    TupleValueH(llvm::Value *alloc, const Type &type, const TupleInfo *i, CodeGenContext &c);
+
+    const std::vector<Value> &unpack() const override;
+    Value extract(int id) const override;
+
+private:
+    const TupleInfo *m_info;
+    CodeGenContext &m_ctx;
+    mutable std::vector<Value> values;
+};
+
+class StructValue : public FirstClassValue, public NamedAggregateValue
+{
+public:
+    StructValue(llvm::Value *val, const Type &ty, const StructInfo *info, CodeGenContext &ctx);
+
+    Value extract(int id) const override;
+    Value extract(const std::string &name) const override;
+
+private:
+    const StructInfo *m_info;
+    CodeGenContext &m_ctx;
+};
+
+class UnionValue : public FirstClassValue, public NamedAggregateValue
+{
+public:
+    UnionValue(llvm::Value *val, const Type &ty, const UnionInfo *info, CodeGenContext &ctx);
+
+    Value extract(int id) const override;
+    Value extract(const std::string &name) const override;
+
+private:
+    const UnionInfo *m_info;
+    CodeGenContext &m_ctx;
+};
+
+
+Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType, bool mut = false);
+
 Value simpleValue(llvm::Value *val, const Type &type);
-Value valuePack(std::vector<Value::V> &vec);
-Value structValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c);
-Value unionValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const UnionInfo *i, CodeGenContext &c);
-Value tupleValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c);
+Value valuePack(std::vector<Value> &vec);
+Value structValue(const Type &t, llvm::Value *alloc, const StructInfo *i, CodeGenContext &c);
+Value unionValue(const Type &t, llvm::Value *alloc, const UnionInfo *i, CodeGenContext &c);
+Value tupleValue(const Type &t, llvm::Value *alloc, const TupleInfo *i, CodeGenContext &c);
 
 #endif

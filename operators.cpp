@@ -126,26 +126,26 @@ static llvm::Value *pointerIntBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue
 Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
 {
     auto rhsVal = rhs->codeGen(context);
-    auto rhsExprs = rhsVal->unpack();
+    auto rhsExprs = rhsVal->getSpecialization<FirstClassValue>();
     auto lhsVal = lhs->codeGen(context);
-    auto &lhsExprs = lhsVal->unpack();
-    if (rhsExprs.size() != lhsExprs.size()) {
-        err(token(), "both operands must have the same cardinality");
-    }
-    assert(rhsExprs.size() == 1);
-    for (size_t i = 0; i < rhsExprs.size(); ++i) {
-        auto lhsValue = lhsExprs[i].load(context);
-        auto rhsValue = rhsExprs[i].load(context);
+    auto lhsExprs = lhsVal->getSpecialization<FirstClassValue>();
+//     if (rhsExprs.size() != lhsExprs.size()) {
+//         err(token(), "both operands must have the same cardinality");
+//     }
+//     assert(rhsExprs.size() == 1);
+//     for (size_t i = 0; i < rhsExprs.size(); ++i) {
+        auto lhsValue = lhsExprs->load(context);
+        auto rhsValue = rhsExprs->load(context);
         auto lhst = lhsValue->getType();
         auto rhst = rhsValue->getType();
         bool sameType = lhst == rhst;
 
-        lhsExprs[i].value->dump();
-        rhsExprs[i].value->dump();
+        lhsExprs->value()->dump();
+        rhsExprs->value()->dump();
 
         llvm::Value *value = nullptr;
         if (lhst->isIntegerTy() && rhst->isIntegerTy()) {
-            value = integerBinOp(rhs->token(), lhsValue, rhsValue, rhsExprs[i].type, op, context);
+            value = integerBinOp(rhs->token(), lhsValue, rhsValue, rhsExprs->type(), op, context);
 
             m_constraints.push_back({ lhsVal, rhsVal });
         } else if (lhst->isPointerTy() && sameType) {
@@ -159,15 +159,15 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
             err(token(), "invalid operands for binary expression");
         }
         return simpleValue(value, LlvmType(value->getType()));
-    }
+//     }
     return {};
 }
 
 void NBinaryOperator::pushConstraints(bool negate)
 {
     for (auto &&c: m_constraints) {
-        auto &lt = c.lVal.unpack()[0].type;
-        auto &rt = c.rVal.unpack()[0].type;
+        auto &lt = c.lVal.type();
+        auto &rt = c.rVal.type();
         if ((!negate && op == NBinaryOperator::OP::Equal) ||
             (negate && op == NBinaryOperator::OP::NotEqual)) {
             lt.typeConstraint().add(rt.typeConstraint(), this);
@@ -181,7 +181,7 @@ void NBinaryOperator::pushConstraints(bool negate)
 void NBinaryOperator::popConstraints()
 {
     for (auto &&c: m_constraints) {
-        auto &lt = c.lVal.unpack()[0].type;
+        auto &lt = c.lVal.type();
         lt.typeConstraint().removeFromSource(this);
     }
 }

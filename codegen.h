@@ -84,6 +84,7 @@ struct TupleInfo {
 
 struct FunctionInfo {
     std::vector<Type> argTypes;
+    Type returnType;
 };
 
 class CodeGenContext {
@@ -115,7 +116,7 @@ public:
     NIfaceDeclaration *interface(const std::string &name) const;
     void addInterface(NIfaceDeclaration *iface);
 
-    llvm::Function *functionTemplate(const std::string &name, std::vector<Value::V> &values);
+    llvm::Function *functionTemplate(const std::string &name, std::vector<FirstClassValue *> &values);
     void addFunctionTemplate(NFunctionDeclaration *func);
 
     FunctionInfo *addFunctionInfo(llvm::Function *function);
@@ -136,7 +137,7 @@ public:
     void pushBlock(llvm::BasicBlock *block, llvm::Function *function, CodeGenBlock *parent);
     void popBlock();
 
-    llvm::Value *convertTo(llvm::Value *value, llvm::Type *type) const;
+    llvm::Value *convertTo(llvm::Value *value, const Type &from, const Type &to);
 
     llvm::Value *allocate(llvm::Type *type, const std::string &name, llvm::Value *toStore);
 
@@ -144,7 +145,7 @@ public:
     llvm::Type *declaredType(const std::string &name) const;
 
 private:
-    llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<Value::V> &values);
+    llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<FirstClassValue *> &values);
 
     std::stack<CodeGenBlock> m_blocks;
     llvm::Function *m_mainFunction;

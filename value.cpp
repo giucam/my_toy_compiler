@@ -1,277 +1,219 @@
 
+#include <sstream>
+
 #include "value.h"
 #include "codegen.h"
 #include "common.h"
 
+Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType, bool mut)
+{
+    auto type = valueType.get(ctx);
+    while (type->isPointerTy()) {
+        type = type->getPointerElementType();
+    }
+
+    Value v = [&]() {
+        if (type->isStructTy()) {
+            if (auto info = ctx.structInfo(type)) {
+                return structValue(valueType, value, info, ctx);
+            } else if (auto info = ctx.tupleInfo(type)) {
+                return tupleValue(valueType, value, info, ctx);
+            } else if (auto info = ctx.unionInfo(type)) {
+                return unionValue(valueType, value, info, ctx);
+            }
+        }
+        return simpleValue(value, valueType);
+    }();
+    v.setMutable(mut);
+    return v;
+}
+
+
+llvm::Value *FirstClassValue::load(CodeGenContext &ctx) const
+{
+    return ctx.convertTo(m_value, LlvmType(m_value->getType()), m_type);
+}
+
+
+StructValue::StructValue(llvm::Value *val, const Type &ty, const StructInfo *info, CodeGenContext &ctx)
+           : FirstClassValue(val, ty)
+           , m_info(info)
+           , m_ctx(ctx)
+{
+}
+
+Value StructValue::extract(int id) const
+{
+    if (id < 0 || id >= (int)m_info->fields.size()) {
+        throw OutOfRangeException(typeName(m_info->type), m_info->fields.size());
+    }
+
+    //cache the values
+    std::stringstream ss;
+    ss << "__struct_" << this << "_" << id;
+
+    if (auto value = m_ctx.local(ss.str())) {
+        return value;
+    }
+
+    auto v = value();
+    while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
+        v = new llvm::LoadInst(v, "", false, m_ctx.currentBlock()->block);
+    }
+
+    auto id1 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, 0, false));
+    auto id2 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, id, false));
+
+    bool mut = m_info->fields[id].mut;
+    auto value = createValue(m_ctx, llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", m_ctx.currentBlock()->block), m_info->fields[id].type, mut);
+    m_ctx.storeLocal(ss.str(), value);
+    return value;
+}
+
+Value StructValue::extract(const std::string &name) const
+{
+    int id = -1;
+    for (size_t i = 0; i < m_info->fields.size(); ++i) {
+        if (m_info->fields[i].name == name) {
+            id = i;
+            break;
+        }
+    }
+    if (id == -1) {
+        throw InvalidFieldException(typeName(m_info->type));
+    }
+    return extract(id);
+}
+
+
+
+UnionValue::UnionValue(llvm::Value *val, const Type &ty, const UnionInfo *info, CodeGenContext &ctx)
+          : FirstClassValue(val, ty)
+          , m_info(info)
+          , m_ctx(ctx)
+{
+}
+
+Value UnionValue::extract(int id) const
+{
+    if (id < 0 || id >= (int)m_info->fields.size()) {
+        throw OutOfRangeException(typeName(m_info->type), m_info->fields.size());
+    }
+
+    auto v = value();
+    while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
+        v = new llvm::LoadInst(v, "", false, m_ctx.currentBlock()->block);
+    }
+
+    bool mut = m_info->fields[id].mut;
+    auto type = m_info->fields[id].type.get(m_ctx)->getPointerTo();
+
+    return createValue(m_ctx, new llvm::BitCastInst(v, type, "", m_ctx.currentBlock()->block), m_info->fields[id].type, mut);
+}
+
+Value UnionValue::extract(const std::string &name) const
+{
+    int id = -1;
+    for (size_t i = 0; i < m_info->fields.size(); ++i) {
+        if (m_info->fields[i].name == name) {
+            id = i;
+            break;
+        }
+    }
+    if (id == -1) {
+        throw InvalidFieldException(typeName(m_info->type));
+    }
+    return extract(id);
+}
+
+
+TupleValue::TupleValue(std::vector<Value> &values)
+{
+    std::swap(values, m_values);
+
+    std::vector<Type> types;
+    for (auto &&v: m_values) {
+        types.push_back(v.type());
+    }
+    m_type = TupleType(types);
+}
+
+Type &TupleValue::type()
+{
+    return m_type;
+}
+
+Value TupleValue::extract(int id) const
+{
+    if (id < 0 || id >= (int)m_values.size()) {
+        throw OutOfRangeException(m_type.name(), m_values.size());
+    }
+    return m_values[id];
+}
+
+
+
+TupleValueH::TupleValueH(llvm::Value *alloc, const Type &type, const TupleInfo *i, CodeGenContext &c)
+    : FirstClassValue(alloc, type)
+    , m_info(i)
+    , m_ctx(c)
+{
+}
+
+const std::vector<Value> &TupleValueH::unpack() const
+{
+    // TupleValues are only used when returning a tuple from a function. When we then clone it to
+    // store it into a variable, create a ValuePack instead, with all the values in the original tuple.
+
+    auto v = value();
+    while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
+        v = new llvm::LoadInst(v, "", false, m_ctx.currentBlock()->block);
+    }
+
+    values.clear();
+    int s = static_cast<llvm::StructType *>(m_info->type)->elements().size();
+    for (int id = 0; id < s; ++id) {
+
+        auto id1 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, 0, false));
+        auto id2 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, id, false));
+
+        auto val = llvm::GetElementPtrInst::CreateInBounds(v, { id1, id2 }, "", m_ctx.currentBlock()->block);
+        values.push_back(createValue(m_ctx, val, LlvmType(val->getType())));
+    }
+
+    return values;
+}
+
+Value TupleValueH::extract(int id) const
+{
+    return unpack()[id];
+}
+
+
+
 Value simpleValue(llvm::Value *val, const Type &type)
 {
-    struct SimpleValH
-    {
-        SimpleValH(llvm::Value *val, const Type &t) : values({{ val, t, true }}) {}
-
-        const std::vector<Value::V> &unpack() const
-        {
-            return values;
-        }
-        std::vector<Value::V> &unpack()
-        {
-            return values;
-        }
-        Value::V extract(int id) const
-        {
-            if (id != 0) {
-                throw OutOfRangeException(values[0].type.name(), 1);
-            }
-            return values[0];
-        }
-        Value::V extract(const std::string &name) const
-        {
-            return { nullptr, {} };
-        }
-
-        SimpleValH clone(std::vector<Value::V> &values) const
-        {
-            return SimpleValH(values[0].value, values[0].type);
-        }
-
-        std::vector<Value::V> values;
-    };
-    SimpleValH h(val, type);
-    return Value(std::move(h));
+    return FirstClassValue(val, type);
 }
 
-struct ValuePackH
+Value valuePack(std::vector<Value> &vec)
 {
-    ValuePackH(std::vector<Value::V> &vec) { std::swap(vec, values); }
-    std::vector<Value::V> values;
-    const std::vector<Value::V> &unpack() const
-    {
-        return values;
-    }
-    std::vector<Value::V> &unpack()
-    {
-        return values;
-    }
-    Value::V extract(int id) const
-    {
-        if (id < 0 || id >= (int)values.size()) {
-            std::string name = "(";
-            for (auto it = values.begin(); it != values.end(); ++it) {
-                auto &&v = *it;
-                name += v.type.name();
-                if (it + 1 != values.end()) {
-                    name += ", ";
-                }
-            }
-            name += ")";
-
-            throw OutOfRangeException(name, values.size());
-        }
-        return unpack()[id];
-    }
-    Value::V extract(const std::string &name) const
-    {
-        return { nullptr,  {} };
-    }
-    ValuePackH clone(std::vector<Value::V> &values) const
-    {
-        return ValuePackH(values);
-    }
-};
-
-Value valuePack(std::vector<Value::V> &vec)
-{
-    ValuePackH h(vec);
-    return Value(std::move(h));
+    return TupleValue(vec);
 }
 
-Value structValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
+Value structValue(const Type &t, llvm::Value *alloc, const StructInfo *i, CodeGenContext &c)
 {
-    struct StructValueH
-    {
-        StructValueH(llvm::Value *alloc, llvm::Type *type, const StructInfo *i, CodeGenContext &c)
-            : value({{alloc, LlvmType(type), true}}), info(i), ctx(c)
-        {
-        }
-
-        const std::vector<Value::V> &unpack() const
-        {
-            return value;
-        }
-        std::vector<Value::V> &unpack()
-        {
-            return value;
-        }
-        Value::V extract(int id) const
-        {
-            if (id < 0 || id >= (int)info->fields.size()) {
-                throw OutOfRangeException(typeName(info->type), info->fields.size());
-            }
-
-            auto v = value[0].value;
-            while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
-                v = new llvm::LoadInst(v, "", false, ctx.currentBlock()->block);
-            }
-
-            auto id1 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, 0, false));
-            auto id2 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, id, false));
-
-            bool mut = info->fields[id].mut;
-            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), info->fields[id].type, mut };
-        }
-        Value::V extract(const std::string &name) const
-        {
-            int id = -1;
-            for (size_t i = 0; i < info->fields.size(); ++i) {
-                if (info->fields[i].name == name) {
-                    id = i;
-                    break;
-                }
-            }
-            if (id == -1) {
-                throw InvalidFieldException(typeName(info->type));
-            }
-            return extract(id);
-        }
-        StructValueH clone(std::vector<Value::V> &values) const
-        {
-            return StructValueH(values[0].value, values[0].type.get(ctx), info, ctx);
-        }
-
-        std::vector<Value::V> value;
-        const StructInfo *info;
-        CodeGenContext &ctx;
-    };
-    StructValueH h(alloc, type, i, c);
-    return Value(std::move(h));
+    return StructValue(alloc, t, i, c);
 }
 
-Value unionValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const UnionInfo *i, CodeGenContext &c)
+Value unionValue(const Type &t, llvm::Value *alloc, const UnionInfo *i, CodeGenContext &c)
 {
-    struct UnionValue
-    {
-        UnionValue(llvm::Value *alloc, llvm::Type *type, const UnionInfo *i, CodeGenContext &c)
-            : value({{alloc, LlvmType(type), true}}), info(i), ctx(c)
-        {
-        }
-
-        const std::vector<Value::V> &unpack() const
-        {
-            return value;
-        }
-        std::vector<Value::V> &unpack()
-        {
-            return value;
-        }
-        Value::V extract(int id) const
-        {
-            if (id < 0 || id >= (int)info->fields.size()) {
-                throw OutOfRangeException(typeName(info->type), info->fields.size());
-            }
-
-            auto v = value[0].value;
-            while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
-                v = new llvm::LoadInst(v, "", false, ctx.currentBlock()->block);
-            }
-
-            bool mut = info->fields[id].mut;
-            auto type = info->fields[id].type.get(ctx)->getPointerTo();
-
-            return { new llvm::BitCastInst(v, type, "", ctx.currentBlock()->block), info->fields[id].type, mut };
-
-
-        }
-        Value::V extract(const std::string &name) const
-        {
-            int id = -1;
-            for (size_t i = 0; i < info->fields.size(); ++i) {
-                if (info->fields[i].name == name) {
-                    id = i;
-                    break;
-                }
-            }
-            if (id == -1) {
-                throw InvalidFieldException(typeName(info->type));
-            }
-            return extract(id);
-        }
-        UnionValue clone(std::vector<Value::V> &values) const
-        {
-            return UnionValue(values[0].value, values[0].type.get(ctx), info, ctx);
-        }
-
-        std::vector<Value::V> value;
-        const UnionInfo *info;
-        CodeGenContext &ctx;
-    };
-    UnionValue h(alloc, type, i, c);
-    return Value(std::move(h));
+    return UnionValue(alloc, t, i, c);
 }
 
-Value tupleValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
+Value tupleValue(const Type &t, llvm::Value *alloc, const TupleInfo *i, CodeGenContext &c)
 {
-    struct TupleValueH
-    {
-        TupleValueH(llvm::Value *alloc, llvm::Type *type, const TupleInfo *i, CodeGenContext &c)
-            : value({{alloc, LlvmType(type), true}}), info(i), ctx(c)
-        {
-        }
-
-        const std::vector<Value::V> &unpack() const
-        {
-            return value;
-        }
-        std::vector<Value::V> &unpack()
-        {
-            return value;
-        }
-        Value::V extract(int id) const
-        {
-            if (id != 0) {
-                throw OutOfRangeException(value[0].type.name(), 1);
-            }
-            return value[0];
-        }
-        Value::V extract(const std::string &name) const
-        {
-            throw InvalidFieldException(typeName(info->type));
-            return { nullptr, {} };
-        }
-        ValuePackH clone(std::vector<Value::V> &values) const
-        {
-            // TupleValues are only used when returning a tuple from a function. When we then clone it to
-            // store it into a variable, create a ValuePack instead, with all the values in the original tuple.
-
-            auto v = values[0].value;
-            while (v->getType()->isPointerTy() && v->getType()->getPointerElementType()->isPointerTy()) {
-                v = new llvm::LoadInst(v, "", false, ctx.currentBlock()->block);
-            }
-
-            values.clear();
-            int s = static_cast<llvm::StructType *>(info->type)->elements().size();
-            for (int id = 0; id < s; ++id) {
-
-                auto id1 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, 0, false));
-                auto id2 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, id, false));
-
-                auto val = llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block);
-                values.push_back({val, LlvmType(val->getType())});
-            }
-
-            return ValuePackH(values);
-        }
-
-        std::vector<Value::V> value;
-        const TupleInfo *info;
-        CodeGenContext &ctx;
-    };
-    TupleValueH h(alloc, type, i, c);
-    return Value(std::move(h));
-}
-
-llvm::Value *Value::V::load(CodeGenContext &ctx) const
-{
-    return ctx.convertTo(value, type.get(ctx));
+    return TupleValueH(alloc, t, i, c);
 }
 
 void Value::setMutable(bool m)
