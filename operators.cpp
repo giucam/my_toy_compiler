@@ -11,6 +11,7 @@ static llvm::Value *integerBinOp(const Token &token, llvm::Value *lhsValue, llvm
             case NBinaryOperator::OP::Mul: return llvm::Instruction::Mul;
             case NBinaryOperator::OP::Sub: return llvm::Instruction::Sub;
             case NBinaryOperator::OP::Div: return llvm::Instruction::SDiv;
+            case NBinaryOperator::OP::Remainder: return llvm::Instruction::SRem;
             case NBinaryOperator::OP::Equal: return llvm::CmpInst::ICMP_EQ;
             case NBinaryOperator::OP::NotEqual: return llvm::CmpInst::ICMP_NE;
             case NBinaryOperator::OP::Lesser: return llvm::CmpInst::ICMP_SLT;
@@ -20,6 +21,7 @@ static llvm::Value *integerBinOp(const Token &token, llvm::Value *lhsValue, llvm
     }();
 
     switch (op) {
+        case NBinaryOperator::OP::Remainder:
         case NBinaryOperator::OP::Div: {
             if (!rhsType.typeConstraint().isCompatibleWith(TypeConstraint(TypeConstraint::Operator::NotEqual, 0))) {
                 err(token, "divisor value is of type '{}' and may be 0; guard the operation with an if statement", rhsType.name());
@@ -49,6 +51,7 @@ static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBi
             case NBinaryOperator::OP::Mul: return llvm::Instruction::FMul;
             case NBinaryOperator::OP::Sub: return llvm::Instruction::FSub;
             case NBinaryOperator::OP::Div: return llvm::Instruction::FDiv;
+            case NBinaryOperator::OP::Remainder: return llvm::Instruction::FRem;
             default:
                 break;
         }
@@ -60,6 +63,7 @@ static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBi
         case NBinaryOperator::OP::Mul:
         case NBinaryOperator::OP::Sub:
         case NBinaryOperator::OP::Div:
+        case NBinaryOperator::OP::Remainder:
             return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
@@ -92,6 +96,7 @@ static llvm::Value *pointerBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, N
         case NBinaryOperator::OP::Mul:
         case NBinaryOperator::OP::Sub:
         case NBinaryOperator::OP::Div:
+        case NBinaryOperator::OP::Remainder:
             return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:

@@ -278,6 +278,9 @@ Token Lexer::readNextToken()
         } else if (m_lastChar == '$') {
             nextChar();
             return token(Token::Type::Dollar);
+        } else if (m_lastChar == '%') {
+            nextChar();
+            return token(Token::Type::Percent);
         } else {
             break;
         }

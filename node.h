@@ -147,6 +147,7 @@ public:
         Add,
         Sub,
         Div,
+        Remainder,
         Lesser,
         Greater,
         Equal,

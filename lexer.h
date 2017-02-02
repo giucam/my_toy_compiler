@@ -38,6 +38,7 @@ public:
         Dot,
         Star,
         Div,
+        Percent,
         Plus,
         Minus,
         Equal,
@@ -106,6 +107,7 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(Dot, "'.'")
         TOKSTR(Star, "'*'")
         TOKSTR(Div, "'/'")
+        TOKSTR(Percent, "'%'");
         TOKSTR(Plus, "'+'")
         TOKSTR(Minus, "'-'")
         TOKSTR(Equal, "'='")

@@ -35,6 +35,7 @@ static int opPrecedence(Token::Type t)
     switch (t) {
         case Token::Type::Star: return 40;
         case Token::Type::Div: return 40;
+        case Token::Type::Percent: return 30;
         case Token::Type::Plus: return 20;
         case Token::Type::Minus: return 20;
         case Token::Type::LeftAngleBracket: return 10;
@@ -62,6 +63,7 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
             switch (opTok.type()) {
                 case Token::Type::Star: return NBinaryOperator::OP::Mul;
                 case Token::Type::Div: return NBinaryOperator::OP::Div;
+                case Token::Type::Percent: return NBinaryOperator::OP::Remainder;
                 case Token::Type::Plus: return NBinaryOperator::OP::Add;
                 case Token::Type::Minus: return NBinaryOperator::OP::Sub;
                 case Token::Type::LeftAngleBracket: return NBinaryOperator::OP::Lesser;
@@ -193,6 +195,7 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
             case Token::Type::CompareNotEqual:
             case Token::Type::Star:
             case Token::Type::Div:
+            case Token::Type::Percent:
             case Token::Type::Minus:
             case Token::Type::Plus: {
                 expr = parseBinOp(std::move(expr), 0);
