@@ -144,7 +144,7 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
         rhsExprs[i].value->dump();
 
         llvm::Value *value = nullptr;
-        if (lhst->isIntegerTy() && sameType) {
+        if (lhst->isIntegerTy() && rhst->isIntegerTy()) {
             value = integerBinOp(rhs->token(), lhsValue, rhsValue, rhsExprs[i].type, op, context);
 
             m_constraints.push_back({ lhsVal, rhsVal });

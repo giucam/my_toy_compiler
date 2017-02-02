@@ -116,10 +116,8 @@ Value structValue(const Type &t, llvm::Value *alloc, llvm::Type *type, const Str
             auto id1 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, 0, false));
             auto id2 = llvm::ConstantInt::get(ctx.context(), llvm::APInt(32, id, false));
 
-            auto st = static_cast<llvm::StructType *>(info->type);
-
             bool mut = info->fields[id].mut;
-            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), LlvmType(st->elements()[id]), mut };
+            return { llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", ctx.currentBlock()->block), info->fields[id].type, mut };
         }
         Value::V extract(const std::string &name) const
         {

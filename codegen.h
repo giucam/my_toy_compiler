@@ -63,6 +63,7 @@ struct StructInfo {
     struct FieldInfo {
         std::string name;
         bool mut;
+        Type type;
     };
     std::vector<FieldInfo> fields;
 };

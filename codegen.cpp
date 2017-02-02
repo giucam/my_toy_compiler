@@ -690,11 +690,16 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
 
         auto converted = context.convertTo(values[i].value, argTy);
         if (info && !converted) {
-            if (argTy->isIntegerTy() && values[i].value->getType()->isIntegerTy()) {
+
+            fmt::print("{} {}\n",(void*)info->argTypes[i].getSpecialization<IntegerType>() ,(void*) values[i].type.getSpecialization<IntegerType>());
+
+            if (info->argTypes[i].getSpecialization<IntegerType>() && values[i].type.getSpecialization<IntegerType>()) {
+
+//             if (argTy->isIntegerTy() && values[i].value->getType()->isIntegerTy()) {
                 auto intTy = info->argTypes[i].getSpecialization<IntegerType>();
 
-                int max = intTy->maxValue();
-                int min = intTy->minValue();
+                auto max = intTy->maxValue();
+                auto min = intTy->minValue();
                 TypeConstraint constraint;
                 constraint.addConstraint(TypeConstraint::Operator::LesserEqual, max);
                 constraint.addConstraint(TypeConstraint::Operator::GreaterEqual, min);
@@ -1117,7 +1122,7 @@ Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
     info->type = type;
     info->fields.reserve(elements.size());
     for (auto &&el: elements) {
-        info->fields.push_back({ el.name, el.mut });
+        info->fields.push_back({ el.name, el.mut, el.type });
     }
     return {};
 }

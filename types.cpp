@@ -158,13 +158,13 @@ std::string IntegerType::name() const
 long long IntegerType::maxValue() const
 {
     int shifts = m_bits - m_signed * 1;
-    return (1 << shifts) - 1;
+    return (1ll << shifts) - 1;
 }
 
 long long IntegerType::minValue() const
 {
     if (m_signed) {
-        return - (1 << m_bits);
+        return - (1ll << m_bits);
     }
     return 0;
 }
@@ -172,20 +172,7 @@ long long IntegerType::minValue() const
 
 llvm::Type *FloatingType::get(CodeGenContext &ctx) const
 {
-    switch (m_bits) {
-        case 16:
-            return llvm::Type::getHalfTy(ctx.context());
-        case 32:
-            return llvm::Type::getFloatTy(ctx.context());
-        case 64:
-            return llvm::Type::getDoubleTy(ctx.context());
-        case 128:
-            return llvm::Type::getFP128Ty(ctx.context());
-        default:
-            break;
-    }
-    error("unsupported bits size for floating point type: {}", m_bits);
-    return nullptr;
+    return llvm::IntegerType::get(ctx.context(), m_bits);
 }
 
 std::string FloatingType::name() const
