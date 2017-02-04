@@ -34,7 +34,12 @@ public:
     void addConstraint(Operator op, int v);
     void add(const TypeConstraint &c, void *source);
     void addNegate(const TypeConstraint &c, void *source);
+    void addGreater(const TypeConstraint &c, void *source);
     void removeFromSource(void *source);
+
+    TypeConstraint operator/(const TypeConstraint &other) const;
+    TypeConstraint operator*(const TypeConstraint &other) const;
+    TypeConstraint operator+(const TypeConstraint &other) const;
 
 private:
     struct Constraint {

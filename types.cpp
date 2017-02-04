@@ -71,8 +71,10 @@ bool TypeConstraint::isCompatibleWith(const TypeConstraint &c) const
             case Operator::NotEqual:
                 return (c1.op == Operator::NotEqual && c1.value == c2.value) ||
                        (c1.op == Operator::Equal && c1.value != c2.value) ||
-                       (c1.op == Operator::Greater && c1.value >= c2.value) ||
-                       (c1.op == Operator::Lesser && c1.value <= c2.value);
+                       (c1.op == Operator::Greater && c1.value > c2.value) ||
+                       (c1.op == Operator::Lesser && c1.value < c2.value) ||
+                       (c1.op == Operator::GreaterEqual && c1.value > c2.value) ||
+                       (c1.op == Operator::LesserEqual && c1.value < c2.value);
             case Operator::Greater:
                 return (c1.op == Operator::Equal && c1.value > c2.value) ||
                        (c1.op == Operator::Greater && c1.value >= c2.value);
@@ -130,11 +132,114 @@ void TypeConstraint::addNegate(const TypeConstraint &constraint, void *source)
     }
 }
 
+void TypeConstraint::addGreater(const TypeConstraint &constraint, void *source)
+{
+    for (auto &&c: constraint.m_constraints) {
+        switch (c.op) {
+            case Operator::Equal:
+                m_constraints.push_back({ Operator::GreaterEqual, c.value, source });
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 void TypeConstraint::removeFromSource(void *source)
 {
     m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
                                        [&](const Constraint &c) { return c.source == source; }),
                         m_constraints.end());
+}
+
+TypeConstraint TypeConstraint::operator/(const TypeConstraint &other) const
+{
+    auto mergedConstraints = [](const Constraint &c1, const Constraint &c2) -> Optional<Constraint>
+    {
+        switch (c1.op) {
+            case Operator::Equal:
+                if (c2.op == Operator::Equal) return Constraint { Operator::Equal, c1.value / c2.value };
+                break;
+            case Operator::GreaterEqual:
+                if (c2.op == Operator::Equal) return Constraint { Operator::GreaterEqual, c1.value / c2.value };
+                break;
+            default:
+                break;
+        }
+        return {};
+    };
+
+    TypeConstraint result;
+    for (auto &&c1: m_constraints) {
+        for (auto &&c2: other.m_constraints) {
+            auto c = mergedConstraints(c1, c2);
+            if (c) {
+                result.m_constraints.push_back(c);
+            }
+        }
+    }
+    return result;
+}
+
+TypeConstraint TypeConstraint::operator*(const TypeConstraint &other) const
+{
+    auto mergedConstraints = [](const Constraint &c1, const Constraint &c2) -> Optional<Constraint>
+    {
+        switch (c1.op) {
+            case Operator::Equal:
+                if (c2.op == Operator::Equal) return Constraint { Operator::Equal, c1.value * c2.value };
+                break;
+            case Operator::GreaterEqual:
+                if (c2.op == Operator::Equal) return Constraint { Operator::GreaterEqual, c1.value * c2.value };
+                break;
+            default:
+                break;
+        }
+        return {};
+    };
+
+    TypeConstraint result;
+    for (auto &&c1: m_constraints) {
+        for (auto &&c2: other.m_constraints) {
+            auto c = mergedConstraints(c1, c2);
+            if (c) {
+                result.m_constraints.push_back(c);
+            }
+        }
+    }
+    return result;
+}
+
+TypeConstraint TypeConstraint::operator+(const TypeConstraint &other) const
+{
+    auto mergedConstraints = [](const Constraint &c1, const Constraint &c2) -> Optional<Constraint>
+    {
+        switch (c1.op) {
+            case Operator::NotEqual:
+                if (c2.op == Operator::Equal) return Constraint { Operator::NotEqual, c1.value + c2.value };
+                break;
+            case Operator::Equal:
+                if (c2.op == Operator::Equal) return Constraint { Operator::Equal, c1.value + c2.value };
+                break;
+            case Operator::GreaterEqual:
+                if (c2.op == Operator::Equal) return Constraint { Operator::GreaterEqual, c1.value + c2.value };
+                break;
+            default:
+                break;
+        }
+        return {};
+    };
+
+    TypeConstraint result;
+    for (auto &&c1: m_constraints) {
+        for (auto &&c2: other.m_constraints) {
+            auto c = mergedConstraints(c1, c2);
+            if (c) {
+                result.m_constraints.push_back(c);
+            }
+        }
+    }
+    return result;
 }
 
 llvm::Type *VoidType::get(CodeGenContext &ctx) const

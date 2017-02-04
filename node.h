@@ -152,6 +152,8 @@ public:
         Greater,
         Equal,
         NotEqual,
+        GreaterEqual,
+        LesserEqual,
     };
 
     OP op;

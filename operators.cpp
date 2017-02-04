@@ -3,7 +3,7 @@
 #include "codegen.h"
 #include "common.h"
 
-static llvm::Value *integerBinOp(const Token &token, llvm::Value *lhsValue, llvm::Value *rhsValue, const Type &rhsType, NBinaryOperator::OP op, CodeGenContext &ctx)
+static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type &lhsType, llvm::Value *rhsValue, const Type &rhsType, NBinaryOperator::OP op, CodeGenContext &ctx)
 {
     auto instr = [&]() -> int {
         switch (op) {
@@ -16,6 +16,8 @@ static llvm::Value *integerBinOp(const Token &token, llvm::Value *lhsValue, llvm
             case NBinaryOperator::OP::NotEqual: return llvm::CmpInst::ICMP_NE;
             case NBinaryOperator::OP::Lesser: return llvm::CmpInst::ICMP_SLT;
             case NBinaryOperator::OP::Greater: return llvm::CmpInst::ICMP_SGT;
+            case NBinaryOperator::OP::GreaterEqual: return llvm::CmpInst::ICMP_SGE;
+            case NBinaryOperator::OP::LesserEqual: return llvm::CmpInst::ICMP_SLE;
         }
         return -1;
     }();
@@ -29,18 +31,36 @@ static llvm::Value *integerBinOp(const Token &token, llvm::Value *lhsValue, llvm
         } //fallthrough
         case NBinaryOperator::OP::Add:
         case NBinaryOperator::OP::Mul:
-        case NBinaryOperator::OP::Sub:
-            return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
+        case NBinaryOperator::OP::Sub: {
+            auto result = llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
+            Type t = rhsType;
+            t.setTypeConstraint([&]() {
+                switch (op) {
+                    case NBinaryOperator::OP::Div:
+                        return lhsType.typeConstraint() / rhsType.typeConstraint();
+                    case NBinaryOperator::OP::Mul:
+                        return lhsType.typeConstraint() * rhsType.typeConstraint();
+                    case NBinaryOperator::OP::Add:
+                        return lhsType.typeConstraint() + rhsType.typeConstraint();
+                    default:
+                        break;
+                }
+                return TypeConstraint();
+            }());
+            return simpleValue(result, t);
+        }
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
         case NBinaryOperator::OP::Lesser:
-        case NBinaryOperator::OP::Greater: {
+        case NBinaryOperator::OP::Greater:
+        case NBinaryOperator::OP::GreaterEqual:
+        case NBinaryOperator::OP::LesserEqual: {
             auto cmp = new llvm::ICmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
-            return cmp;
+            return simpleValue(cmp, LlvmType(cmp->getType()));
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
         }
     }
-    return nullptr;
+    return {};
 }
 
 static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBinaryOperator::OP op, CodeGenContext &ctx)
@@ -68,7 +88,9 @@ static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBi
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
         case NBinaryOperator::OP::Lesser:
-        case NBinaryOperator::OP::Greater: {
+        case NBinaryOperator::OP::Greater:
+        case NBinaryOperator::OP::GreaterEqual:
+        case NBinaryOperator::OP::LesserEqual: {
             auto cmp = new llvm::FCmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
             return cmp;
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
@@ -101,7 +123,9 @@ static llvm::Value *pointerBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, N
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
         case NBinaryOperator::OP::Lesser:
-        case NBinaryOperator::OP::Greater: {
+        case NBinaryOperator::OP::Greater:
+        case NBinaryOperator::OP::GreaterEqual:
+        case NBinaryOperator::OP::LesserEqual: {
             auto cmp = new llvm::FCmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
             return cmp;
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
@@ -145,9 +169,11 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
 
         llvm::Value *value = nullptr;
         if (lhst->isIntegerTy() && rhst->isIntegerTy()) {
-            value = integerBinOp(rhs->token(), lhsValue, rhsValue, rhsExprs->type(), op, context);
+            auto value = integerBinOp(rhs->token(), lhsValue, lhsExprs->type(), rhsValue, rhsExprs->type(), op, context);
 
             m_constraints.push_back({ lhsVal, rhsVal });
+            return value;
+
         } else if (lhst->isPointerTy() && sameType) {
             value = pointerBinOp(lhsValue, rhsValue, op, context);
         } else if (lhst->isFloatingPointTy() && sameType) {
@@ -174,6 +200,9 @@ void NBinaryOperator::pushConstraints(bool negate)
         } else if ((!negate && op == NBinaryOperator::OP::NotEqual) ||
                    (negate && op == NBinaryOperator::OP::Equal)) {
             lt.typeConstraint().addNegate(rt.typeConstraint(), this);
+        } else if ((!negate && op == NBinaryOperator::OP::GreaterEqual) ||
+                   (negate && op == NBinaryOperator::OP::Lesser)) {
+            lt.typeConstraint().addGreater(rt.typeConstraint(), this);
         }
     }
 }
