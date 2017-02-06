@@ -174,10 +174,15 @@ const std::vector<Value> &TupleValueH::unpack() const
     int s = static_cast<llvm::StructType *>(m_info->type)->elements().size();
     for (int id = 0; id < s; ++id) {
 
-        auto id1 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, 0, false));
-        auto id2 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, id, false));
+        llvm::Value *val;
+        if (v->getType()->isPointerTy()) {
+            auto id1 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, 0, false));
+            auto id2 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, id, false));
 
-        auto val = llvm::GetElementPtrInst::CreateInBounds(v, { id1, id2 }, "", m_ctx.currentBlock()->block);
+            val = llvm::GetElementPtrInst::CreateInBounds(v, { id1, id2 }, "", m_ctx.currentBlock()->block);
+        } else {
+            val = llvm::ExtractValueInst::Create(v, llvm::makeArrayRef((unsigned)id), "", m_ctx.currentBlock()->block);
+        }
         values.push_back(createValue(m_ctx, val, LlvmType(val->getType())));
     }
 

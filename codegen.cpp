@@ -695,11 +695,6 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
     }
 
     llvm::Value *call = llvm::CallInst::Create(function, llvm::makeArrayRef(vals), "", context.currentBlock()->block);
-    if (function->getReturnType()->isStructTy()) {
-        llvm::AllocaInst *alloc = new llvm::AllocaInst(call->getType(), "", context.currentBlock()->block);
-        new llvm::StoreInst(call, alloc, false, context.currentBlock()->block);
-        call = alloc;
-    }
     return createValue(context, call, LlvmType(function->getReturnType()));
 }
 
