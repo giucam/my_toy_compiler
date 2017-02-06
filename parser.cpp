@@ -88,7 +88,7 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
             }
         }
 
-        lhs = std::make_unique<NBinaryOperator>(std::move(lhs), op, std::move(rhs));
+        lhs = std::make_unique<NBinaryOperator>(opTok, std::move(lhs), op, std::move(rhs));
     }
 }
 
@@ -140,7 +140,7 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
     } else if (tok.type() == Token::Type::LeftParens) {
         ExpressionList list = parseExpressionList();
 
-        return std::make_unique<NExpressionPack>(tok, list);
+        expression = std::make_unique<NExpressionPack>(tok, list);
     } else if (tok.type() == Token::Type::Ampersand) {
         nextToken();
         checkTokenType(m_lexer.peekToken(), Token::Type::Identifier);
@@ -163,12 +163,21 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
 
     if (expression) {
         expression->pushContext(context);
-        if (m_lexer.peekToken().type() == Token::Type::Dot) {
-            nextToken();
+        switch (m_lexer.peekToken().type()) {
+            case Token::Type::Dot: {
+                nextToken();
 
-            auto ex = parsePrimary(expression.get());
-            ex->attach(std::move(expression));
-            return ex;
+                auto ex = parsePrimary(expression.get());
+                ex->attach(std::move(expression));
+                return ex;
+            }
+            case Token::Type::As: {
+                auto tok = nextToken();
+                auto type = parseType();
+                return std::make_unique<NCastExpression>(tok, std::move(expression), type);
+            }
+            default:
+                break;
         }
         return expression;
     }

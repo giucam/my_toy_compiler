@@ -159,8 +159,8 @@ public:
     OP op;
     std::unique_ptr<NExpression> lhs;
     std::unique_ptr<NExpression> rhs;
-    NBinaryOperator(std::unique_ptr<NExpression> lhs, OP op, std::unique_ptr<NExpression> rhs) :
-                NExpression(), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
+    NBinaryOperator(const Token &tok, std::unique_ptr<NExpression> lhs, OP op, std::unique_ptr<NExpression> rhs) :
+                NExpression(tok), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
     Optional<Value> codeGen(CodeGenContext &context) override;
 
     void pushConstraints(bool negate) override;
@@ -485,6 +485,20 @@ private:
     std::string m_name;
     Type m_type;
     std::vector<Entry> m_entries;
+};
+
+class NCastExpression : public NExpression
+{
+public:
+    NCastExpression(const Token &token, std::unique_ptr<NExpression> expr, const Type &type)
+        : NExpression(token), m_expression(std::move(expr)), m_type(type)
+    {}
+
+    Optional<Value> codeGen(CodeGenContext &context) override;
+
+private:
+    std::unique_ptr<NExpression> m_expression;
+    Type m_type;
 };
 
 #endif

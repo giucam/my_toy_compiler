@@ -354,7 +354,7 @@ Optional<Value> NDouble::codeGen(CodeGenContext &context)
     std::cout << "Creating double: " << value << '\n';
 
     auto v = llvm::ConstantFP::get(llvm::Type::getDoubleTy(context.context()), value);
-    return simpleValue(v, LlvmType(v->getType()));
+    return simpleValue(v, FloatingType(64));
 }
 
 Optional<Value> NString::codeGen(CodeGenContext &context)
@@ -1363,5 +1363,36 @@ Optional<Value> NEnumDeclaration::codeGen(CodeGenContext &ctx)
         ctx.storeGlobal(m_name, EnumValue(ctx, this));
     }
 
+    return {};
+}
+
+Optional<Value> NCastExpression::codeGen(CodeGenContext &ctx)
+{
+    auto value = m_expression->codeGen(ctx);
+    fmt::print("cast {} to {}\n", value->type().name(), m_type.name());
+
+    if (auto firstclass = value->getSpecialization<FirstClassValue>()) {
+        auto type = firstclass->type().get(ctx);
+        auto castType = m_type.get(ctx);
+
+        if (type->isIntegerTy()) {
+            if (castType->isIntegerTy()) {
+                fmt::print("int \n");
+                return createValue(ctx, new llvm::TruncInst(firstclass->load(ctx), m_type.get(ctx), "", ctx.currentBlock()->block), m_type);
+            } else if (castType->isFloatingPointTy()) {
+                auto val = new llvm::SIToFPInst(firstclass->load(ctx), m_type.get(ctx), "", ctx.currentBlock()->block);
+                val->getType()->dump();
+                return createValue(ctx, val, m_type);
+            }
+        } else if (type->isFloatingPointTy()) {
+            if (castType->isIntegerTy()) {
+                firstclass->value()->dump();
+                auto val = new llvm::FPToSIInst(firstclass->load(ctx), m_type.get(ctx), "", ctx.currentBlock()->block);
+                return createValue(ctx, val, m_type);
+            }
+        }
+    }
+
+    err(token(), "cannot cast value from type '{}' to '{}'", value->type().name(), m_type.name());
     return {};
 }

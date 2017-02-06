@@ -277,7 +277,20 @@ long long IntegerType::minValue() const
 
 llvm::Type *FloatingType::get(CodeGenContext &ctx) const
 {
-    return llvm::IntegerType::get(ctx.context(), m_bits);
+    switch (m_bits) {
+        case 16:
+            return llvm::Type::getHalfTy(ctx.context());
+        case 32:
+            return llvm::Type::getFloatTy(ctx.context());
+        case 64:
+            return llvm::Type::getDoubleTy(ctx.context());
+        case 128:
+            return llvm::Type::getFP128Ty(ctx.context());
+        default:
+            break;
+    }
+    error("unsupported bits size for floating point type: {}", m_bits);
+    return nullptr;
 }
 
 std::string FloatingType::name() const

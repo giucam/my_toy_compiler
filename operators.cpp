@@ -182,7 +182,7 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
             value = pointerIntBinOp(lhsValue, rhsValue, op, context);
         }
         if (!value) {
-            err(token(), "invalid operands for binary expression");
+            err(token(), "invalid operands '{}' and '{}' for binary expression", lhsExprs->type().name(), rhsExprs->type().name());
         }
         return simpleValue(value, LlvmType(value->getType()));
 //     }
