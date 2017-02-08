@@ -56,7 +56,7 @@ static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type 
         case NBinaryOperator::OP::GreaterEqual:
         case NBinaryOperator::OP::LesserEqual: {
             auto cmp = new llvm::ICmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
-            return simpleValue(cmp, LlvmType(cmp->getType()));
+            return simpleValue(cmp, llvmType(cmp->getType()));
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
         }
     }
@@ -153,6 +153,9 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
     auto rhsExprs = rhsVal->getSpecialization<FirstClassValue>();
     auto lhsVal = lhs->codeGen(context);
     auto lhsExprs = lhsVal->getSpecialization<FirstClassValue>();
+
+    fmt::print("binop {} {}\n",lhsVal->type().name(), rhsVal->type().name());
+
 //     if (rhsExprs.size() != lhsExprs.size()) {
 //         err(token(), "both operands must have the same cardinality");
 //     }
@@ -184,7 +187,7 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
         if (!value) {
             err(token(), "invalid operands '{}' and '{}' for binary expression", lhsExprs->type().name(), rhsExprs->type().name());
         }
-        return simpleValue(value, LlvmType(value->getType()));
+        return simpleValue(value, llvmType(value->getType()));
 //     }
     return {};
 }

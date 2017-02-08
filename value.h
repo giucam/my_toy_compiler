@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "types.h"
+#include "common.h"
 
 namespace llvm {
     class Value;
@@ -34,6 +35,18 @@ public:
     std::string type;
 };
 
+class ValueBindingPoint
+{
+public:
+    ValueBindingPoint() {}
+    ValueBindingPoint(const Type &t) : m_type(t) {}
+
+    const Type &type() const { return m_type; }
+
+private:
+    Type m_type;
+};
+
 class ValueSpecialization;
 
 class Value
@@ -43,6 +56,7 @@ class Value
         virtual ~IfaceBase() {}
         virtual Type &type() = 0;
         ValueSpecialization *handlerBase;
+        Optional<ValueBindingPoint> bindingPoint;
     };
     template<class T>
     struct Iface : IfaceBase
@@ -68,6 +82,9 @@ public:
 
     void setMutable(bool m);
     bool isMutable() const { return m_flags & (int)Flags::Mutable; }
+
+    void setBindingPoint(const ValueBindingPoint &bp) { m_iface->bindingPoint = bp; }
+    const Optional<ValueBindingPoint> &bindingPoint() const { return m_iface->bindingPoint; }
 
     inline Type &type() { return m_iface->type(); }
 
@@ -102,6 +119,7 @@ public:
 
     llvm::Value *value() const { return m_value; }
     Type &type() { return m_type; }
+    const Type &type() const { return m_type; }
 
     llvm::Value *load(CodeGenContext &ctx) const;
 

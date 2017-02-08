@@ -23,6 +23,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "value.h"
+#include "common.h"
 
 class NBlock;
 class NIdentifier;
@@ -31,23 +32,6 @@ class NIfacePrototype;
 class NFunctionDeclaration;
 class TypeName;
 class CodeGenContext;
-
-template<class T>
-class Optional
-{
-public:
-    Optional() : m_valid(false) {}
-    Optional(T t) : m_valid(true), m_value(std::move(t)) {}
-
-    operator bool() const { return m_valid; }
-    operator const T &() const { return m_value; }
-    const T *operator->() const { return &m_value; }
-    T *operator->() { return &m_value; }
-
-private:
-    bool m_valid;
-    T m_value;
-};
 
 class CodeGenBlock {
 public:
@@ -59,7 +43,7 @@ public:
 };
 
 struct StructInfo {
-    llvm::Type *type;
+    Type type;
     struct FieldInfo {
         std::string name;
         bool mut;

@@ -8,7 +8,9 @@
 
 Type Type::getPointerTo() const
 {
-    return PointerType(*this);
+    Type t = PointerType(*this);
+    t.setTypeConstraint(typeConstraint());
+    return t;
 }
 
 std::string Type::name() const
@@ -27,7 +29,7 @@ TypeConstraint::TypeConstraint()
 
 TypeConstraint::TypeConstraint(TypeConstraint::Operator op, int v)
 {
-    m_constraints.push_back({op, v, nullptr});
+    m_constraints.push_back({ op, v, nullptr });
 }
 
 std::string TypeConstraint::name() const
@@ -64,47 +66,70 @@ std::string TypeConstraint::name() const
 
 bool TypeConstraint::isCompatibleWith(const TypeConstraint &c) const
 {
-    auto isCompat = [&](const Constraint &c1, const Constraint &c2) {
+    enum {
+        Compatible,
+        NotCompatible,
+        Orthogonal,
+    };
+
+    auto compatibility = [&](const Constraint &c1, const Constraint &c2) -> int {
         switch (c2.op) {
             case Operator::Equal:
-                return c1.op == Operator::Equal && c1.value == c2.value;
+                if (c1.op == Operator::Equal && c1.value == c2.value) return Compatible;
+                break;
             case Operator::NotEqual:
-                return (c1.op == Operator::NotEqual && c1.value == c2.value) ||
-                       (c1.op == Operator::Equal && c1.value != c2.value) ||
-                       (c1.op == Operator::Greater && c1.value > c2.value) ||
-                       (c1.op == Operator::Lesser && c1.value < c2.value) ||
-                       (c1.op == Operator::GreaterEqual && c1.value > c2.value) ||
-                       (c1.op == Operator::LesserEqual && c1.value < c2.value);
+                if (c1.op == Operator::NotEqual && c1.value != c2.value) return Orthogonal;
+                if ((c1.op == Operator::NotEqual && c1.value == c2.value) ||
+                    (c1.op == Operator::Equal && c1.value != c2.value) ||
+                    (c1.op == Operator::Greater && c1.value >= c2.value) ||
+                    (c1.op == Operator::Lesser && c1.value < c2.value) ||
+                    (c1.op == Operator::GreaterEqual && c1.value > c2.value) ||
+                    (c1.op == Operator::LesserEqual && c1.value < c2.value)) return Compatible;
+                break;
             case Operator::Greater:
-                return (c1.op == Operator::Equal && c1.value > c2.value) ||
-                       (c1.op == Operator::Greater && c1.value >= c2.value);
+                if ((c1.op == Operator::Equal && c1.value > c2.value) ||
+                    (c1.op == Operator::Greater && c1.value >= c2.value) ||
+                    (c1.op == Operator::GreaterEqual && c1.value > c2.value)) return Compatible;
+                break;
             case Operator::Lesser:
-                return (c1.op == Operator::Equal && c1.value < c2.value) ||
-                       (c1.op == Operator::Lesser && c1.value <= c2.value);
+                if ((c1.op == Operator::Equal && c1.value < c2.value) ||
+                    (c1.op == Operator::Lesser && c1.value <= c2.value)) return Compatible;
+                break;
             case Operator::GreaterEqual:
-                return (c1.op == Operator::Equal && c1.value >= c2.value) ||
-                       (c1.op == Operator::Greater && c1.value >= c2.value) ||
-                       (c1.op == Operator::GreaterEqual && c1.value >= c2.value);
+                if ((c1.op == Operator::Equal && c1.value >= c2.value) ||
+                    (c1.op == Operator::Greater && c1.value >= c2.value) ||
+                    (c1.op == Operator::GreaterEqual && c1.value >= c2.value)) return Compatible;
+                break;
             case Operator::LesserEqual:
-                return (c1.op == Operator::Equal && c1.value <= c2.value) ||
-                       (c1.op == Operator::Lesser && c1.value <= c2.value) ||
-                       (c1.op == Operator::LesserEqual && c1.value <= c2.value);
+                if ((c1.op == Operator::Equal && c1.value <= c2.value) ||
+                    (c1.op == Operator::Lesser && c1.value <= c2.value) ||
+                    (c1.op == Operator::LesserEqual && c1.value <= c2.value)) return Compatible;
+                break;
         }
-        return false;
+        return NotCompatible;
     };
 
     if (m_constraints.empty() && !c.m_constraints.empty()) {
         return false;
+    } else if (c.m_constraints.empty()) {
+        return true;
     }
 
+    bool compat = false;
     for (auto &&c1: m_constraints) {
         for (auto &&c2: c.m_constraints) {
-            if (!isCompat(c1, c2)) {
-                return false;
+            auto c = compatibility(c1, c2);
+            switch (c) {
+                case NotCompatible:
+                    return false;
+                case Compatible:
+                    compat = true;
+                case Orthogonal:
+                    break;
             }
         }
     }
-    return true;
+    return compat;
 }
 
 void TypeConstraint::addConstraint(Operator op, int v)
@@ -112,14 +137,14 @@ void TypeConstraint::addConstraint(Operator op, int v)
     m_constraints.push_back({ op, v, nullptr });
 }
 
-void TypeConstraint::add(const TypeConstraint &constraint, void *source)
+void TypeConstraint::add(const TypeConstraint &constraint, const void *source)
 {
     for (auto &&c: constraint.m_constraints) {
-        m_constraints.push_back({c.op, c.value, source});
+        m_constraints.push_back({ c.op, c.value, source });
     }
 }
 
-void TypeConstraint::addNegate(const TypeConstraint &constraint, void *source)
+void TypeConstraint::addNegate(const TypeConstraint &constraint, const void *source)
 {
     for (auto &&c: constraint.m_constraints) {
         switch (c.op) {
@@ -132,7 +157,7 @@ void TypeConstraint::addNegate(const TypeConstraint &constraint, void *source)
     }
 }
 
-void TypeConstraint::addGreater(const TypeConstraint &constraint, void *source)
+void TypeConstraint::addGreater(const TypeConstraint &constraint, const void *source)
 {
     for (auto &&c: constraint.m_constraints) {
         switch (c.op) {
@@ -163,6 +188,9 @@ TypeConstraint TypeConstraint::operator/(const TypeConstraint &other) const
             case Operator::GreaterEqual:
                 if (c2.op == Operator::Equal) return Constraint { Operator::GreaterEqual, c1.value / c2.value };
                 break;
+            case Operator::Greater:
+                if (c2.op == Operator::Equal) return Constraint { Operator::GreaterEqual, (c1.value + 1) / c2.value };
+                break;
             default:
                 break;
         }
@@ -191,6 +219,9 @@ TypeConstraint TypeConstraint::operator*(const TypeConstraint &other) const
                 break;
             case Operator::GreaterEqual:
                 if (c2.op == Operator::Equal) return Constraint { Operator::GreaterEqual, c1.value * c2.value };
+                break;
+            case Operator::Greater:
+                if (c2.op == Operator::Equal) return Constraint { Operator::Greater, c1.value * c2.value };
                 break;
             default:
                 break;
@@ -309,6 +340,13 @@ std::string PointerType::name() const
     return std::string("*") + m_type.name();
 }
 
+Type PointerType::pointerElementType(const Type &owner) const
+{
+    Type t = m_type;
+    t.setTypeConstraint(owner.typeConstraint());
+    return t;
+}
+
 
 llvm::Type *FunctionPointerType::get(CodeGenContext &ctx) const
 {
@@ -359,6 +397,19 @@ std::string ArgumentPackType::name() const
 }
 
 
+class LlvmType
+{
+    TYPE_SPECIALIZATION
+public:
+    LlvmType(llvm::Type *t) : m_type(t) {}
+
+    llvm::Type *get(CodeGenContext &ctx) const { return m_type; }
+    std::string name() const;
+
+private:
+    llvm::Type *m_type;
+};
+
 llvm::Type *TupleType::get(CodeGenContext &ctx) const
 {
     std::vector<llvm::Type *> ty;
@@ -373,7 +424,7 @@ std::string TupleType::name() const
     std::string n = "(";
     int i = 0;
     for (auto &&t: m_types) {
-        if (i > 0) {
+        if (i++ > 0) {
             n += ", ";
         }
         n += t.name();
@@ -401,4 +452,20 @@ std::string CustomType::name() const
 std::string LlvmType::name() const
 {
     return typeName(m_type);
+}
+
+Type llvmType(llvm::Type *t)
+{
+    int ptr = 0;
+    while (t->isPointerTy()) {
+        ++ptr;
+        t = t->getPointerElementType();
+    }
+
+    Type result = LlvmType(t);
+    while (ptr > 0) {
+        result = result.getPointerTo();
+        --ptr;
+    }
+    return result;
 }

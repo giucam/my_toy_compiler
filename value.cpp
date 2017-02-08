@@ -31,7 +31,10 @@ Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType
 
 llvm::Value *FirstClassValue::load(CodeGenContext &ctx) const
 {
-    return ctx.convertTo(m_value, LlvmType(m_value->getType()), m_type);
+    Type type = llvmType(m_value->getType());
+    type.setTypeConstraint(m_type.typeConstraint());
+
+    return ctx.convertTo(m_value, type, m_type);
 }
 
 
@@ -45,7 +48,7 @@ StructValue::StructValue(llvm::Value *val, const Type &ty, const StructInfo *inf
 Value StructValue::extract(int id) const
 {
     if (id < 0 || id >= (int)m_info->fields.size()) {
-        throw OutOfRangeException(typeName(m_info->type), m_info->fields.size());
+        throw OutOfRangeException(m_info->type.name(), m_info->fields.size());
     }
 
     //cache the values
@@ -65,7 +68,9 @@ Value StructValue::extract(int id) const
     auto id2 = llvm::ConstantInt::get(m_ctx.context(), llvm::APInt(32, id, false));
 
     bool mut = m_info->fields[id].mut;
+
     auto value = createValue(m_ctx, llvm::GetElementPtrInst::CreateInBounds(v, {id1, id2}, "", m_ctx.currentBlock()->block), m_info->fields[id].type, mut);
+    value.setBindingPoint(ValueBindingPoint(m_info->fields[id].type));
     m_ctx.storeLocal(ss.str(), value);
     return value;
 }
@@ -80,7 +85,7 @@ Value StructValue::extract(const std::string &name) const
         }
     }
     if (id == -1) {
-        throw InvalidFieldException(typeName(m_info->type));
+        throw InvalidFieldException(m_info->type.name());
     }
     return extract(id);
 }
@@ -183,7 +188,7 @@ const std::vector<Value> &TupleValueH::unpack() const
         } else {
             val = llvm::ExtractValueInst::Create(v, llvm::makeArrayRef((unsigned)id), "", m_ctx.currentBlock()->block);
         }
-        values.push_back(createValue(m_ctx, val, LlvmType(val->getType())));
+        values.push_back(createValue(m_ctx, val, llvmType(val->getType())));
     }
 
     return values;

@@ -85,4 +85,22 @@ inline void error2(const std::string &filename, int lineno, int colno, Args &&..
     Message(Message::Type::Error, filename, lineno, colno).line(std::forward<Args>(args)...);
 }
 
+template<class T>
+class Optional
+{
+public:
+    Optional() : m_valid(false) {}
+    Optional(T t) : m_valid(true), m_value(std::move(t)) {}
+
+    operator bool() const { return m_valid; }
+    operator const T &() const { return m_value; }
+    const T *operator->() const { return &m_value; }
+    T *operator->() { return &m_value; }
+
+private:
+    bool m_valid;
+    T m_value;
+};
+
+
 #endif

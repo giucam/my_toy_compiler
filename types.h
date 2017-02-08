@@ -32,9 +32,9 @@ public:
     std::string name() const;
 
     void addConstraint(Operator op, int v);
-    void add(const TypeConstraint &c, void *source);
-    void addNegate(const TypeConstraint &c, void *source);
-    void addGreater(const TypeConstraint &c, void *source);
+    void add(const TypeConstraint &c, const void *source);
+    void addNegate(const TypeConstraint &c, const void *source);
+    void addGreater(const TypeConstraint &c, const void *source);
     void removeFromSource(void *source);
 
     TypeConstraint operator/(const TypeConstraint &other) const;
@@ -45,7 +45,7 @@ private:
     struct Constraint {
         Operator op;
         int value;
-        void *source;
+        const void *source;
     };
     std::vector<Constraint> m_constraints;
 };
@@ -149,6 +149,8 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Type pointerElementType(const Type &owner) const;
+
 private:
     const Type m_type;
 };
@@ -220,17 +222,6 @@ private:
     std::string m_name;
 };
 
-class LlvmType
-{
-    TYPE_SPECIALIZATION
-public:
-    LlvmType(llvm::Type *t) : m_type(t) {}
-
-    llvm::Type *get(CodeGenContext &ctx) const { return m_type; }
-    std::string name() const;
-
-private:
-    llvm::Type *m_type;
-};
+Type llvmType(llvm::Type *t);
 
 #endif
