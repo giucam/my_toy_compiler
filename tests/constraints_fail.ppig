@@ -1,0 +1,7 @@
+
+func main(): i32
+{
+    let mut val: i32|$ > 10 = 30;
+    val = 3; //error
+    return 0;
+}

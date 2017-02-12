@@ -32,3 +32,6 @@ target_link_libraries(parser ${LLVM_LDFLAGS} LLVM clang)
 
 add_custom_target(build ./parser -o example example.txt print.lang  DEPENDS parser)
 add_custom_target(run echo "Running..." COMMAND ./example DEPENDS build)
+
+enable_testing()
+add_subdirectory(tests)
