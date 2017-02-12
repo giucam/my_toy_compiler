@@ -8,9 +8,7 @@
 
 Type Type::getPointerTo() const
 {
-    Type t = PointerType(*this);
-    t.setTypeConstraint(typeConstraint());
-    return t;
+    return PointerType(*this);
 }
 
 std::string Type::name() const
@@ -337,14 +335,12 @@ llvm::Type *PointerType::get(CodeGenContext &ctx) const
 
 std::string PointerType::name() const
 {
-    return std::string("*") + m_type.name();
+    return std::string("*(") + m_type.name() + ")";
 }
 
-Type PointerType::pointerElementType(const Type &owner) const
+Type PointerType::pointerElementType() const
 {
-    Type t = m_type;
-    t.setTypeConstraint(owner.typeConstraint());
-    return t;
+    return m_type;
 }
 
 

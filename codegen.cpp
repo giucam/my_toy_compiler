@@ -426,7 +426,10 @@ Optional<Value> NAddressOfExpression::codeGen(CodeGenContext &context)
     auto val = expression()->codeGen(context);
 
     if (auto v = val->getSpecialization<FirstClassValue>()) {
-        return Value(createValue(context, v->value(), v->type().getPointerTo()));
+        auto value = createValue(context, v->value(), v->type().getPointerTo());
+        value.setBindingPoint(ValueBindingPoint(val->bindingPoint()->type().getPointerTo()));
+
+        return value;
     }
     err(token(), "taking address of non first type value");
     return {};
@@ -612,6 +615,10 @@ static bool canStoreInto(CodeGenContext &ctx, const Type &lhs, const Type &rhs)
     if (lhs.get(ctx) != rhs.get(ctx) || !rhs.typeConstraint().isCompatibleWith(lhs.typeConstraint())) {
         return false;
     }
+    if (auto lp = lhs.getSpecialization<PointerType>()) {
+        auto rp = rhs.getSpecialization<PointerType>();
+        return canStoreInto(ctx, lp->pointerElementType(), rp->pointerElementType());
+    }
     return true;
 }
 
@@ -710,19 +717,33 @@ Optional<Value> NAssignment::codeGen(CodeGenContext &context)
 
     auto valueType = [&]() {
         if (auto b = lhsValue->bindingPoint()) {
-            return b->type();
+            if (b->type().isValid()) {
+                return b->type();
+            }
         }
         auto t = lhsFirstClass->type();
         t.setTypeConstraint(TypeConstraint());
         return t;
     }();
 
-    auto value = context.convertTo(rhsFirstClass->value(), rhsFirstClass->type(), valueType);
-    if (!value) {
-        err(token(), "cannot store a variable of type '{}' to a binding point of type '{}'", rhsValue->type().name(), valueType.name());
+    //attempt to convert the rhs to the type of the lhs
+    auto rhsVal = context.convertTo(rhsFirstClass->value(), rhsFirstClass->type(), valueType);
+    auto lhsVal = lhsFirstClass->value();
+    // if that failed, attempt to dereference the left hand side until it matches what is provided on the right hand side
+    if (!rhsVal) {
+        auto rt = rhsFirstClass->type();
+        rt.setTypeConstraint(TypeConstraint());
+        lhsVal = context.convertTo(lhsFirstClass->value(), lhsFirstClass->type(), rt.getPointerTo());
+
+        if (lhsVal && canStoreInto(context, valueType, rhsFirstClass->type().getPointerTo()) ) {
+            rhsVal = rhsFirstClass->value();
+        }
+    }
+    if (!rhsVal) {
+        err(token(), "cannot store a value of type '{}' to a binding point of type '{}'", rhsValue->type().name(), valueType.name());
     }
 
-    new llvm::StoreInst(value, lhsFirstClass->value(), false, context.currentBlock()->block);
+    new llvm::StoreInst(rhsVal, lhsVal, false, context.currentBlock()->block);
     lhsFirstClass->type().setTypeConstraint(rhsFirstClass->type().typeConstraint());
 
     return lhsValue;
@@ -765,13 +786,13 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
         int fromPointer = 0;
         Type t = from;
         while (auto p = t.getSpecialization<PointerType>()) {
-            t = p->pointerElementType(t);
+            t = p->pointerElementType();
             ++fromPointer;
         }
 
         t = from;
         while (fromPointer > srcPointer) {
-            t = t.getSpecialization<PointerType>()->pointerElementType(t);
+            t = t.getSpecialization<PointerType>()->pointerElementType();
             --fromPointer;
         }
         while (fromPointer < srcPointer) {
@@ -779,13 +800,13 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
             ++fromPointer;
         }
 
-        if (!canStoreInto(*this, to, t)) {
-            err({}, "cannot assign a value of type '{}' to a variable of type '{}': type constraint not respected", t.name(), to.name());
-        }
+        return canStoreInto(*this, to, t);
     };
 
     if (baseDest == value->getType()) {
-        checkConstraints();
+        if (!checkConstraints()) {
+            return nullptr;
+        }
         return value;
     }
 
@@ -819,9 +840,7 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
         --srcPointer;
     }
 
-    checkConstraints();
-
-    if (destPointer == srcPointer) {
+    if (destPointer == srcPointer && checkConstraints()) {
         return value;
     }
 
@@ -892,6 +911,14 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
         value.setBindingPoint(ValueBindingPoint(type));
 
         auto toStore = init->getSpecialization<FirstClassValue>();
+
+        auto bp = init->bindingPoint()->type();
+        bp.setTypeConstraint(TypeConstraint());
+
+        if (bp.isValid() && !canStoreInto(ctx, bp, type)) {
+            err(token, "cannot take a pointer of type '{}' to type '{}': type constraints not respected", type.name(), bp.name());
+        }
+
         if (!canStoreInto(ctx, type, toStore->type())) {
             err(token, "mismatched type: assigning value of type '{}' to a variable of type '{}'", toStore->type().name(), type.name());
         }
@@ -915,15 +942,26 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
         flatten(init);
 
         std::vector<Value> values;
+        int i = 0;
         for (auto &&val: sourceFirstclasses) {
             auto alloc = ctx.allocate(val->type().get(ctx), name, val->load(ctx));
-            values.push_back(createValue(ctx, alloc, val->type()));
+            auto value = createValue(ctx, alloc, val->type());
+
+            auto t = sourceValues[i++].bindingPoint()->type();
+            t.setTypeConstraint(TypeConstraint());
+            value.setBindingPoint(ValueBindingPoint(t));
+            values.push_back(value);
         }
 
         if (values.size() == 1) {
             return values.front();
         }
-        return valuePack(values);
+        auto value = valuePack(values);
+
+        auto t = init->bindingPoint()->type();
+        t.setTypeConstraint(TypeConstraint());
+        value.setBindingPoint(ValueBindingPoint(t));
+        return value;
     }
 }
 

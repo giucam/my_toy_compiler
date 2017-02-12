@@ -212,6 +212,21 @@ print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", aaa, tt.1, sss, "poop", 
     num = 1;
     print("divide: 100/{} = {}\n", num, 100 / num); //no error
 
+    let mut val: i32|$ > 10 = 30; //this has type i32|$ > 10
+    let mut vcopy = val; //this is a i32
+    let mut vptr = &val; //this is a *(i32|$ > 10)
+
+    let mut vptr2: *i32|$ > 10 = &val; // ok
+//     let mut vptr3: *i32 = &val; // error
+
+//     val = 3; // error
+    val = 30; // ok
+
+    vcopy = 1; // ok
+
+//     vptr = 4; // error
+    vptr = 40; // ok
+
     return gg;
 }
 

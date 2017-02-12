@@ -149,7 +149,7 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
-    Type pointerElementType(const Type &owner) const;
+    Type pointerElementType() const;
 
 private:
     const Type m_type;

@@ -31,10 +31,12 @@ Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType
 
 llvm::Value *FirstClassValue::load(CodeGenContext &ctx) const
 {
-    Type type = llvmType(m_value->getType());
-    type.setTypeConstraint(m_type.typeConstraint());
+    auto t = m_type;
+    while (t.get(ctx) != m_value->getType()) {
+        t = t.getPointerTo();
+    }
 
-    return ctx.convertTo(m_value, type, m_type);
+    return ctx.convertTo(m_value, t, m_type);
 }
 
 

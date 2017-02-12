@@ -729,8 +729,6 @@ Type Parser::parseType()
         } else {
             type = CustomType(typeTok, typeTok.text());
         }
-
-        type = getPointer(type);
     }
 
     if (m_lexer.peekToken().type() == Token::Type::Pipe) {
@@ -755,6 +753,8 @@ Type Parser::parseType()
 
         type.setTypeConstraint(TypeConstraint(op, std::stol(valueTok.text())));
     }
+
+    type = getPointer(type);
 
     return type;
 }
