@@ -374,7 +374,8 @@ public:
     std::vector<Field> elements;
     Type m_type;
     bool m_hasBody;
-    NStructDeclaration(const std::string &id);
+    bool m_define;
+    NStructDeclaration(const std::string &id, bool defineSize);
 
     const Type &type() const { return m_type; }
     void setFields(std::vector<Field> &e) { std::swap(e, elements); m_hasBody = true; }

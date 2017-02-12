@@ -1,0 +1,57 @@
+
+import "C" "stdio.h";
+import "C" "string.h";
+
+iface printable(A) {
+    func printValue(A);
+}
+
+impl printable(i32) {
+    func printValue(value: i32): void {
+        printf("%d", value);
+    }
+}
+
+impl printable(f64) {
+    func printValue(value: f64): void {
+        printf("%f", value);
+    }
+}
+
+impl printable(*i8) {
+    func printValue(val: *i8): void {
+        fwrite(val, 1, strlen(val), stdout);
+    }
+}
+
+impl printable(i8) {
+    func printValue(val: i8): void {
+        printf("%c", val);
+    }
+}
+
+impl printable(()) {
+    func printValue(): void {
+    }
+}
+
+func print(format: *i8, values: (...)): void
+{
+    let ptr = strchr(format, '{');
+    if (ptr) {
+        let len = ptr - format;
+
+        fwrite(format, 1, len, stdout);
+
+        let (arg, rest) = values;
+        printValue(arg);
+
+        if (strlen(ptr) < 3) {
+            return;
+        }
+
+        print(ptr + 2, rest);
+    } else {
+        fwrite(format, 1, strlen(format), stdout);
+    }
+}

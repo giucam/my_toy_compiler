@@ -50,6 +50,7 @@ struct StructInfo {
         Type type;
     };
     std::vector<FieldInfo> fields;
+    Value sizeValue;
 };
 
 struct UnionInfo {

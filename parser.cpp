@@ -360,7 +360,7 @@ void Parser::parseStruct()
         tok = nextToken();
     }
 
-    auto decl = new NStructDeclaration(nameTok.text());
+    auto decl = new NStructDeclaration(nameTok.text(), !m_importing);
     decl->setFields(list);
     m_block->statements.push_back(decl);
 }

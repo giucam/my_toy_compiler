@@ -1,0 +1,21 @@
+
+// add or remove any field here and rebuild just the lib, the user will continue to work correctly!
+struct Foo {
+//     b: i64;
+    mut a: i32;
+//     c: i64;
+}
+
+func init(mut f: *Foo): void
+{
+    f.a = 3;
+}
+
+func getA(f: *Foo): i32
+{
+    return f.a;
+}
+
+func donum(): i32 { return 5; }
+
+// parser lib.ppig -shared -o libl.so -O0

@@ -1,4 +1,5 @@
 #include <fstream>
+#include <string>
 
 #include <llvm/Support/raw_os_ostream.h>
 
@@ -653,6 +654,20 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
 
     if (name == "count") {
         return constantInteger(context, values.size());
+    } else if (name == "size") {
+        if (values.size() != 1) {
+            err(token(), "the built-in function 'size' accepts only one argument");
+        }
+        auto t = values.front().type().get(context);
+        if (auto info = context.structInfo(t)) {
+            return info->sizeValue;
+        }
+        if (t->isSized()) {
+            llvm::DataLayout layout(&context.module());
+            int s = layout.getTypeSizeInBits(t) / 8;
+            return constantInteger(context, s);
+        }
+        return constantInteger(context, 0);
     }
 
     llvm::Function *function = context.module().getFunction(name.c_str());
@@ -969,15 +984,25 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
 {
     auto t = type.get(ctx);
     size_t numFields = 0;
+    llvm::Value *sizeValue = nullptr;
     if (auto info = ctx.structInfo(t)) {
         numFields = info->fields.size();
+        if (info->sizeValue.isValid()) {
+            sizeValue = info->sizeValue.getSpecialization<FirstClassValue>()->load(ctx);
+        }
     } else if (auto i = ctx.unionInfo(t)) {
         numFields = i->fields.size();
     } else {
         error("boo {}", name);
     }
 
-    llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+    llvm::Value *alloc;
+    if (sizeValue) {
+        alloc = new llvm::AllocaInst(llvm::IntegerType::get(ctx.context(), 8), sizeValue, "", ctx.currentBlock()->block);
+        alloc = new llvm::BitCastInst(alloc, t->getPointerTo(), name.c_str(), ctx.currentBlock()->block);
+    } else {
+        alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+    }
     auto value = createValue(ctx, alloc, type);
 
     if (fields.empty()) {
@@ -1169,10 +1194,11 @@ public:
     mutable llvm::Type *m_type;
 };
 
-NStructDeclaration::NStructDeclaration(const std::string &id)
+NStructDeclaration::NStructDeclaration(const std::string &id, bool def)
                   : id(id)
                   , m_type(StructType(id))
                   , m_hasBody(false)
+                  , m_define(def)
 {
 }
 
@@ -1203,6 +1229,19 @@ Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
     for (auto &&el: elements) {
         info->fields.push_back({ el.name, el.mut, el.type });
     }
+
+    auto sizeType = Type(IntegerType(true, 32));
+    llvm::Constant *sizeValue = nullptr;
+    if (m_define) {
+        llvm::DataLayout layout(&context.module());
+        int s = layout.getTypeSizeInBits(type) / 8;
+        sizeValue = llvm::ConstantInt::get(sizeType.get(context), s, true);
+    }
+    using namespace std::string_literals;
+    auto name = "__struct__"s + id + "__size"s;
+    auto size = new llvm::GlobalVariable(context.module(), sizeType.get(context), false, llvm::GlobalValue::ExternalLinkage, sizeValue, name.c_str());
+    info->sizeValue = createValue(context, size, sizeType);
+
     return {};
 }
 

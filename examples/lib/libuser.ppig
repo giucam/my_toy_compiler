@@ -1,0 +1,15 @@
+
+import "lib.ppig";
+import "print.ppig";
+
+func main(): i32
+{
+    let f: Foo = {};
+    let mut i = donum();
+    f.init();
+
+    print("size of Foo: {} bytes; f.a: {}; i: {}\n", f.size(), f.getA(), i);
+    return f.getA();
+}
+
+// parser print.ppig libuser.ppig -ll -L. -o libuser -O0

@@ -97,6 +97,8 @@ public:
         return dynamic_cast<T *>(m_iface->handlerBase);
     }
 
+    bool isValid() const { return m_iface.get(); }
+
 private:
     std::shared_ptr<IfaceBase> m_iface;
     int m_flags;
