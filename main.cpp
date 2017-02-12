@@ -109,10 +109,14 @@ int main(int argc, char **argv)
     std::vector<std::string> inputfiles;
     for (int i = 1; i < argc; ++i) {
         if (checkOption(argv, i, argc, "-o", clangargs) ||
-            checkOption(argv, i, argc, "-l", clangargs)) {
-            continue;
+            checkOption(argv, i, argc, "-l", clangargs) ||
+            checkOption(argv, i, argc, "-L", clangargs) ||
+            checkOption(argv, i, argc, "-O", clangargs)) {
+        } else if (strcmp(argv[i], "-shared") == 0) {
+            clangargs.push_back("-shared");
+        } else {
+            inputfiles.push_back(argv[i]);
         }
-        inputfiles.push_back(argv[i]);
     }
 
     if (inputfiles.empty()) {
