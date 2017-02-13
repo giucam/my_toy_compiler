@@ -196,7 +196,7 @@ void CParser::parseStruct(CXCursor c)
         if (it != m_structs.end()) {
             return it->second;
         }
-        auto decl = new NStructDeclaration(name.empty() ? signature : name, false);
+        auto decl = new NStructDeclaration(name.empty() ? signature : name, NStructDeclaration::Flags::None);
         m_block->statements.push_back(decl);
         m_types.insert(std::make_pair(type, decl->type()));
         m_structs.insert(std::make_pair(type, decl));

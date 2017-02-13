@@ -1194,11 +1194,11 @@ public:
     mutable llvm::Type *m_type;
 };
 
-NStructDeclaration::NStructDeclaration(const std::string &id, bool def)
+NStructDeclaration::NStructDeclaration(const std::string &id, Flags f)
                   : id(id)
                   , m_type(StructType(id))
                   , m_hasBody(false)
-                  , m_define(def)
+                  , m_flags(f)
 {
 }
 
@@ -1230,17 +1230,19 @@ Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
         info->fields.push_back({ el.name, el.mut, el.type });
     }
 
-    auto sizeType = Type(IntegerType(true, 32));
-    llvm::Constant *sizeValue = nullptr;
-    if (m_define) {
-        llvm::DataLayout layout(&context.module());
-        int s = layout.getTypeSizeInBits(type) / 8;
-        sizeValue = llvm::ConstantInt::get(sizeType.get(context), s, true);
+    if (m_flags & Flags::AbiSafe) {
+        auto sizeType = Type(IntegerType(true, 32));
+        llvm::Constant *sizeValue = nullptr;
+        if (m_flags & Flags::MasterDefinition) {
+            llvm::DataLayout layout(&context.module());
+            int s = layout.getTypeSizeInBits(type) / 8;
+            sizeValue = llvm::ConstantInt::get(sizeType.get(context), s, true);
+        }
+        using namespace std::string_literals;
+        auto name = "__struct__"s + id + "__size"s;
+        auto size = new llvm::GlobalVariable(context.module(), sizeType.get(context), false, llvm::GlobalValue::ExternalLinkage, sizeValue, name.c_str());
+        info->sizeValue = createValue(context, size, sizeType);
     }
-    using namespace std::string_literals;
-    auto name = "__struct__"s + id + "__size"s;
-    auto size = new llvm::GlobalVariable(context.module(), sizeType.get(context), false, llvm::GlobalValue::ExternalLinkage, sizeValue, name.c_str());
-    info->sizeValue = createValue(context, size, sizeType);
 
     return {};
 }

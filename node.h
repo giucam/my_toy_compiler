@@ -370,18 +370,28 @@ public:
         bool mut;
     };
 
+    enum class Flags
+    {
+        None = 0,
+        AbiSafe = 1,
+        MasterDefinition = 2,
+    };
+
     std::string id;
     std::vector<Field> elements;
     Type m_type;
     bool m_hasBody;
-    bool m_define;
-    NStructDeclaration(const std::string &id, bool defineSize);
+    Flags m_flags;
+    NStructDeclaration(const std::string &id, Flags f);
 
     const Type &type() const { return m_type; }
     void setFields(std::vector<Field> &e) { std::swap(e, elements); m_hasBody = true; }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
+inline NStructDeclaration::Flags operator|(NStructDeclaration::Flags a, NStructDeclaration::Flags b) { return (NStructDeclaration::Flags)((int)a | (int)b); }
+inline NStructDeclaration::Flags &operator|=(NStructDeclaration::Flags &a, NStructDeclaration::Flags b) { a = a | b; return a; }
+inline bool operator&(NStructDeclaration::Flags a, NStructDeclaration::Flags b) { return (int)a & (int)b; }
 
 class NUnionDeclaration : public NStatement
 {
