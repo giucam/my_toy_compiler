@@ -15,6 +15,7 @@
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/IRPrintingPasses.h>
 #include <llvm/IR/IRBuilder.h>
+#include "llvm/IR/DIBuilder.h"
 #include <llvm/Bitcode/ReaderWriter.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
@@ -32,6 +33,7 @@ class NIfacePrototype;
 class NFunctionDeclaration;
 class TypeName;
 class CodeGenContext;
+class NFunctionArgumentDeclaration;
 
 class CodeGenBlock {
 public:
@@ -72,9 +74,37 @@ struct FunctionInfo {
     Type returnType;
 };
 
+class Debug
+{
+public:
+    Debug(CodeGenContext *ctx, const std::string &filename);
+
+    llvm::DIFile *fileUnit(const std::string &name);
+    llvm::DIBuilder &builder() { return m_builder; }
+
+    llvm::DISubprogram *createFunction(const Token &token, const std::string &funcName, const std::vector<NFunctionArgumentDeclaration> &arguments);
+    void createVariable(const Token &token, const std::string &name, const Value &value);
+
+    void pushScope(llvm::DIScope *scope);
+    void popScope();
+
+    void setLocation(const Token &token);
+
+    void finalize();
+
+private:
+    CodeGenContext *m_ctx;
+    llvm::DIBuilder m_builder;
+    llvm::DICompileUnit *m_cunit;
+    std::unordered_map<std::string, llvm::DIFile *> m_fileUnits;
+    std::stack<llvm::DIScope *> m_scopes;
+};
+
 class CodeGenContext {
 public:
     CodeGenContext(const std::string &name);
+
+    Debug &debug() { return m_debug; }
 
     bool isFunctionNameAvailable(const std::string &name) const;
 
@@ -138,6 +168,7 @@ private:
     llvm::LLVMContext m_context;
     std::unique_ptr<llvm::Module> m_module;
     llvm::IRBuilder<> m_builder;
+    Debug m_debug;
     std::unordered_map<std::string, StructInfo> m_structInfo;
     std::unordered_map<llvm::Type *, StructInfo *> m_structInfoByType;
     std::unordered_map<std::string, UnionInfo> m_unionInfo;

@@ -814,7 +814,7 @@ NFunctionDeclaration *Parser::parseFunc()
         block = nullptr;
     }
 
-    auto decl = new NFunctionDeclaration(nameTok.text(), retType, list, block);
+    auto decl = new NFunctionDeclaration(nameTok, nameTok.text(), retType, list, block);
     return decl;
 }
 

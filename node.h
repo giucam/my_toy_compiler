@@ -354,9 +354,9 @@ public:
     std::string id;
     std::vector<NFunctionArgumentDeclaration> arguments;
     NBlock *block;
-    NFunctionDeclaration(const std::string &id, const Type &type,
+    NFunctionDeclaration(const Token &tok, const std::string &id, const Type &type,
                          const std::vector<NFunctionArgumentDeclaration> &arguments, NBlock *block) :
-                            type(type), id(id), arguments(arguments), block(block) { }
+                            NStatement(tok), type(type), id(id), arguments(arguments), block(block) { }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };

@@ -150,6 +150,11 @@ Type &TupleValue::type()
     return m_type;
 }
 
+const Type &TupleValue::type() const
+{
+    return m_type;
+}
+
 Value TupleValue::extract(int id) const
 {
     if (id < 0 || id >= (int)m_values.size()) {

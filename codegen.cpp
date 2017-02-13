@@ -8,10 +8,77 @@
 // #include "parser.hpp"
 #include "common.h"
 
+Debug::Debug(CodeGenContext *ctx, const std::string &filename)
+     : m_ctx(ctx)
+     , m_builder(ctx->module())
+     , m_cunit(m_builder.createCompileUnit(llvm::dwarf::DW_LANG_C, filename, ".", "PinkPig", 0, "", 0))
+{
+    ctx->module().addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
+}
+
+void Debug::finalize()
+{
+    m_builder.finalize();
+}
+
+llvm::DIFile *Debug::fileUnit(const std::string &name)
+{
+    auto it = m_fileUnits.find(name);
+    if (it != m_fileUnits.end()) {
+        return it->second;
+    }
+
+    auto un = m_builder.createFile(name, ".");
+    m_fileUnits[name] = un;
+    return un;
+}
+
+llvm::DISubprogram *Debug::createFunction(const Token &token, const std::string &funcName, const std::vector<NFunctionArgumentDeclaration> &arguments)
+{
+    std::vector<llvm::Metadata *> types;
+    for (auto &&a: arguments) {
+        types.push_back(m_builder.createUnspecifiedType(a.type().name()));
+    }
+
+    auto unit = fileUnit(token.filename());
+    auto functionTy = m_builder.createSubroutineType(m_builder.getOrCreateTypeArray(types));
+    return m_builder.createFunction(unit, funcName, llvm::StringRef(), unit, token.lineNo(), functionTy, false, true, token.lineNo(), 0, false);
+}
+
+void Debug::createVariable(const Token &token, const std::string &name, const Value &value)
+{
+    auto file = fileUnit(token.filename());
+    auto ty = m_builder.createUnspecifiedType(value.type().name());
+    auto var = m_builder.createAutoVariable(m_scopes.top(), name, file, token.lineNo(), ty);
+
+    if (auto fc = value.getSpecialization<FirstClassValue>()) {
+        m_builder.insertDeclare(fc->value(), var, m_builder.createExpression(), llvm::DebugLoc::get(token.lineNo(), 0, m_scopes.top()), m_ctx->currentBlock()->block);
+    }
+}
+
+void Debug::pushScope(llvm::DIScope *scope)
+{
+    m_scopes.push(scope);
+}
+
+void Debug::popScope()
+{
+    m_scopes.pop();
+}
+
+void Debug::setLocation(const Token &token)
+{
+    m_ctx->builder().SetCurrentDebugLocation(llvm::DebugLoc::get(token.lineNo(), token.columnNo(), m_scopes.top()));
+}
+
+
 CodeGenContext::CodeGenContext(const std::string &name)
               : m_module(std::make_unique<llvm::Module>(name.c_str(), m_context))
               , m_builder(m_context)
+              , m_debug(this, name)
 {
+    auto file = m_debug.fileUnit(name);
+    m_debug.pushScope(file);
 }
 
 /* Compile the AST into a module */
@@ -27,6 +94,8 @@ void CodeGenContext::generateCode(NBlock &root)
     root.codeGen(*this); /* emit bytecode for the toplevel block */
     builder().CreateRetVoid();
     popBlock();
+
+    m_debug.finalize();
 
     m_mainFunction = m_module->getFunction("main");
 
@@ -709,6 +778,8 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
         }
     }
 
+    context.debug().setLocation(token());
+
     llvm::Value *call = context.builder().CreateCall(function, llvm::makeArrayRef(vals));
     return createValue(context, call, llvmType(function->getReturnType()));
 }
@@ -1037,6 +1108,9 @@ Optional<Value> NVariableDeclaration::codeGen(CodeGenContext &context)
     auto value = init->init(context, id.name());
     value.setMutable(id.isMutable());
     context.storeLocal(id.name(), value);
+
+    context.debug().createVariable(token(), id.name(), value);
+
     return value;
 }
 
@@ -1137,6 +1211,11 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
         info->argTypes.push_back(arg.type());
     }
     info->returnType = type;
+
+    auto subprogram = context.debug().createFunction(token(), id, arguments);
+    function->setSubprogram(subprogram);
+    context.debug().pushScope(subprogram);
+    context.debug().setLocation(token());
 
     if (block) {
         llvm::BasicBlock *bblock = llvm::BasicBlock::Create(context.context(), "entry", function, 0);
@@ -1460,6 +1539,7 @@ Optional<Value> NEnumDeclaration::codeGen(CodeGenContext &ctx)
         {
             return m_type;
         }
+        const Type &type() const { return m_type; }
 
         Value extract(int id) const { return values[id]; }
         Value extract(const std::string &name) const

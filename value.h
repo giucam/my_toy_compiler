@@ -55,6 +55,7 @@ class Value
     {
         virtual ~IfaceBase() {}
         virtual Type &type() = 0;
+        virtual const Type &type() const = 0;
         ValueSpecialization *handlerBase;
         Optional<ValueBindingPoint> bindingPoint;
     };
@@ -63,6 +64,7 @@ class Value
     {
         Iface(T h) : handler(std::move(h)) { handlerBase = &handler; }
         Type &type() override { return handler.type(); }
+        const Type &type() const override { return handler.type(); }
         T handler;
     };
 
@@ -87,6 +89,7 @@ public:
     const Optional<ValueBindingPoint> &bindingPoint() const { return m_iface->bindingPoint; }
 
     inline Type &type() { return m_iface->type(); }
+    inline const Type &type() const { return m_iface->type(); }
 
     template<class T>
     T *getSpecialization() const
@@ -154,6 +157,7 @@ public:
     TupleValue(std::vector<Value> &values);
 
     Type &type();
+    const Type &type() const;
 
     const std::vector<Value> &unpack() const override { return m_values; }
     Value extract(int id) const override;
