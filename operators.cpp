@@ -34,7 +34,7 @@ static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type 
         case NBinaryOperator::OP::Add:
         case NBinaryOperator::OP::Mul:
         case NBinaryOperator::OP::Sub: {
-            auto result = llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
+            auto result = ctx.builder().CreateBinOp((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue);
             Type t = rhsType;
             t.setTypeConstraint([&]() {
                 switch (op) {
@@ -57,7 +57,7 @@ static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type 
         case NBinaryOperator::OP::Greater:
         case NBinaryOperator::OP::GreaterEqual:
         case NBinaryOperator::OP::LesserEqual: {
-            auto cmp = new llvm::ICmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
+            auto cmp = ctx.builder().CreateICmp((llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
             return simpleValue(cmp, llvmType(cmp->getType()));
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
         }
@@ -87,14 +87,14 @@ static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBi
         case NBinaryOperator::OP::Div:
         case NBinaryOperator::OP::Remainder:
         case NBinaryOperator::OP::Or:
-            return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
+            return ctx.builder().CreateBinOp((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue);
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
         case NBinaryOperator::OP::Lesser:
         case NBinaryOperator::OP::Greater:
         case NBinaryOperator::OP::GreaterEqual:
         case NBinaryOperator::OP::LesserEqual: {
-            auto cmp = new llvm::FCmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
+            auto cmp = ctx.builder().CreateFCmp((llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
             return cmp;
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
         }
@@ -104,8 +104,8 @@ static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBi
 
 static llvm::Value *pointerBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBinaryOperator::OP op, CodeGenContext &ctx)
 {
-    lhsValue = new llvm::PtrToIntInst(lhsValue, llvm::Type::getInt32Ty(ctx.context()), "", ctx.currentBlock()->block);
-    rhsValue = new llvm::PtrToIntInst(rhsValue, llvm::Type::getInt32Ty(ctx.context()), "", ctx.currentBlock()->block);
+    lhsValue = ctx.builder().CreatePtrToInt(lhsValue, llvm::Type::getInt32Ty(ctx.context()));
+    rhsValue = ctx.builder().CreatePtrToInt(rhsValue, llvm::Type::getInt32Ty(ctx.context()));
     auto instr = [&]() -> int {
         switch (op) {
             case NBinaryOperator::OP::Add: return llvm::Instruction::Add;
@@ -123,14 +123,14 @@ static llvm::Value *pointerBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, N
         case NBinaryOperator::OP::Div:
         case NBinaryOperator::OP::Remainder:
         case NBinaryOperator::OP::Or:
-            return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
+            return ctx.builder().CreateBinOp((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue);
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
         case NBinaryOperator::OP::Lesser:
         case NBinaryOperator::OP::Greater:
         case NBinaryOperator::OP::GreaterEqual:
         case NBinaryOperator::OP::LesserEqual: {
-            auto cmp = new llvm::FCmpInst(*ctx.currentBlock()->block, (llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
+            auto cmp = ctx.builder().CreateFCmp((llvm::CmpInst::Predicate)instr, lhsValue, rhsValue);
             return cmp;
 //                 return CastInst::CreateIntegerCast(cmp, Type::getInt8Ty(context.TheContext), false, "", context.currentBlock()->block);
         }
@@ -143,7 +143,7 @@ static llvm::Value *pointerIntBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue
     switch (op) {
         case NBinaryOperator::OP::Add:
         case NBinaryOperator::OP::Sub: {
-            return llvm::GetElementPtrInst::CreateInBounds(lhsValue, { rhsValue }, "", ctx.currentBlock()->block);
+            return ctx.builder().CreateInBoundsGEP(lhsValue, { rhsValue });
         }
         default:
             break;

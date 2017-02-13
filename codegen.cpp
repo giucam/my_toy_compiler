@@ -10,6 +10,7 @@
 
 CodeGenContext::CodeGenContext(const std::string &name)
               : m_module(std::make_unique<llvm::Module>(name.c_str(), m_context))
+              , m_builder(m_context)
 {
 }
 
@@ -24,7 +25,7 @@ void CodeGenContext::generateCode(NBlock &root)
     /* Push a new variable/block context */
     pushBlock(bblock, nullptr, nullptr);
     root.codeGen(*this); /* emit bytecode for the toplevel block */
-    llvm::ReturnInst::Create(m_context, bblock);
+    builder().CreateRetVoid();
     popBlock();
 
     m_mainFunction = m_module->getFunction("main");
@@ -101,18 +102,17 @@ llvm::Value *CodeGenContext::makeTupleValue(const std::vector<llvm::Value *> &va
         return llvm::ConstantStruct::get(type, {});
     }
 
-    llvm::AllocaInst *alloc = new llvm::AllocaInst(type, name.c_str(), currentBlock()->block);
+    llvm::AllocaInst *alloc = builder().CreateAlloca(type, nullptr, name.c_str());
 
     int id = 0;
     for (auto &&v: values) {
-        auto id1 = llvm::ConstantInt::get(context(), llvm::APInt(32, 0, false));
-        auto id2 = llvm::ConstantInt::get(context(), llvm::APInt(32, id++, false));
+        auto id1 = builder().getInt32(0);
+        auto id2 = builder().getInt32(id++);
 
-        auto value = llvm::GetElementPtrInst::CreateInBounds(alloc, {id1, id2}, "", currentBlock()->block);
-        new llvm::StoreInst(v, value, false, currentBlock()->block);
+        auto value = builder().CreateInBoundsGEP(alloc, {id1, id2});
+        builder().CreateStore(v, value, false);
     }
 
-//     return new LoadInst(alloc, "", false, context.currentBlock()->block);
     return alloc;
 }
 
@@ -294,17 +294,21 @@ Optional<Value> CodeGenContext::global(const std::string &name) const
 void CodeGenContext::pushBlock(llvm::BasicBlock *block, llvm::Function *function, CodeGenBlock *parent)
 {
     m_blocks.push({block, function, parent, {}, false });
+    m_builder.SetInsertPoint(block);
 }
 
 void CodeGenContext::popBlock()
 {
     m_blocks.pop();
+    if (m_blocks.size() > 0) {
+        m_builder.SetInsertPoint(m_blocks.top().block);
+    }
 }
 
 llvm::Value *CodeGenContext::allocate(llvm::Type *type, const std::string &name, llvm::Value *val)
 {
-    llvm::AllocaInst *alloc = new llvm::AllocaInst(type, name.c_str(), currentBlock()->block);
-    new llvm::StoreInst(val, alloc, false, currentBlock()->block);
+    llvm::AllocaInst *alloc = builder().CreateAlloca(type, nullptr, name.c_str());
+    builder().CreateStore(val, alloc, false);
     return alloc;
 }
 
@@ -372,13 +376,7 @@ Optional<Value> NString::codeGen(CodeGenContext &context)
         }
     }
     std::cout << ")\n";
-    auto constant = llvm::ConstantDataArray::getString(context.context(), value);
-    auto var = new llvm::GlobalVariable(context.module(), llvm::ArrayType::get(llvm::Type::getInt8Ty(context.context()), value.length() + 1), true, llvm::GlobalValue::PrivateLinkage, constant, ".str");
-
-    auto id1 = llvm::ConstantInt::get(context.context(), llvm::APInt(32, 0, false));
-    auto id2 = llvm::ConstantInt::get(context.context(), llvm::APInt(32, 0, false));
-
-    auto v = llvm::GetElementPtrInst::CreateInBounds(var, {id1, id2}, "", context.currentBlock()->block);
+    auto v = context.builder().CreateGlobalStringPtr(value, ".str");
     return simpleValue(v, llvmType(v->getType()));
 }
 
@@ -541,7 +539,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 
     func->block->codeGen(*this);
     if (!currentBlock()->returned) {
-        llvm::ReturnInst::Create(context(), nullptr, currentBlock()->block);
+        builder().CreateRetVoid();
     }
 
     popBlock();
@@ -552,7 +550,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 static llvm::Value *loadValue(llvm::Value *value, CodeGenContext &context)
 {
     if (value->getType()->isPointerTy()) {
-        return new llvm::LoadInst(value, "", false, context.currentBlock()->block);
+        return context.builder().CreateLoad(value);
     }
     return value;
 }
@@ -711,7 +709,7 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
         }
     }
 
-    llvm::Value *call = llvm::CallInst::Create(function, llvm::makeArrayRef(vals), "", context.currentBlock()->block);
+    llvm::Value *call = context.builder().CreateCall(function, llvm::makeArrayRef(vals));
     return createValue(context, call, llvmType(function->getReturnType()));
 }
 
@@ -758,7 +756,7 @@ Optional<Value> NAssignment::codeGen(CodeGenContext &context)
         err(token(), "cannot store a value of type '{}' to a binding point of type '{}'", rhsValue->type().name(), valueType.name());
     }
 
-    new llvm::StoreInst(rhsVal, lhsVal, false, context.currentBlock()->block);
+    context.builder().CreateStore(rhsVal, lhsVal);
     lhsFirstClass->type().setTypeConstraint(rhsFirstClass->type().typeConstraint());
 
     return lhsValue;
@@ -841,7 +839,7 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
             constraint.addConstraint(TypeConstraint::Operator::LesserEqual, max);
             constraint.addConstraint(TypeConstraint::Operator::GreaterEqual, min);
             if (from.typeConstraint().isCompatibleWith(constraint)) {
-                return new llvm::TruncInst(value, to.get(*this), "", currentBlock()->block);
+                return builder().CreateTrunc(value, to.get(*this));
             } else {
                 err({}, "cannot truncate from type '{}' to type '{}': value must be between {} and {}",  from.name(), to.name(), min, max);
             }
@@ -851,7 +849,7 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
     }
 
     while (srcPointer > destPointer) {
-        value = new llvm::LoadInst(value, "", currentBlock()->block);
+        value = builder().CreateLoad(value);
         --srcPointer;
     }
 
@@ -908,7 +906,7 @@ Optional<Value> NReturnStatement::codeGen(CodeGenContext &context)
         }
     }
 
-    auto v = llvm::ReturnInst::Create(context.context(), llvmval, context.currentBlock()->block);
+    auto v = context.builder().CreateRet(llvmval);
     return simpleValue(v, llvmType(v->getType()));
 }
 
@@ -921,7 +919,7 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
 
     if (type.isValid()) {
         auto t = type.get(ctx);
-        llvm::AllocaInst *alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+        llvm::AllocaInst *alloc = ctx.builder().CreateAlloca(t, nullptr, name.c_str());
         auto value = createValue(ctx, alloc, type);
         value.setBindingPoint(ValueBindingPoint(type));
 
@@ -938,7 +936,7 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
             err(token, "mismatched type: assigning value of type '{}' to a variable of type '{}'", toStore->type().name(), type.name());
         }
 
-        new llvm::StoreInst(toStore->value(), alloc, false, ctx.currentBlock()->block);
+        ctx.builder().CreateStore(toStore->value(), alloc);
         return value;
     } else {
         std::vector<Value> sourceValues;
@@ -998,10 +996,10 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
 
     llvm::Value *alloc;
     if (sizeValue) {
-        alloc = new llvm::AllocaInst(llvm::IntegerType::get(ctx.context(), 8), sizeValue, "", ctx.currentBlock()->block);
-        alloc = new llvm::BitCastInst(alloc, t->getPointerTo(), name.c_str(), ctx.currentBlock()->block);
+        alloc = ctx.builder().CreateAlloca(llvm::IntegerType::get(ctx.context(), 8), sizeValue);
+        alloc = ctx.builder().CreateBitCast(alloc, t->getPointerTo(), name.c_str());
     } else {
-        alloc = new llvm::AllocaInst(t, name.c_str(), ctx.currentBlock()->block);
+        alloc = ctx.builder().CreateAlloca(t, nullptr, name.c_str());
     }
     auto value = createValue(ctx, alloc, type);
 
@@ -1026,7 +1024,7 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
             err(token, "cannot store a value of type '{}' into a value of type '{}'", firstclass->type().name(), destfirstclass->type().name());
         }
 
-        new llvm::StoreInst(srcValue, destfirstclass->value(), false, ctx.currentBlock()->block);
+        ctx.builder().CreateStore(srcValue, destfirstclass->value());
     }
 
     return value;
@@ -1160,7 +1158,7 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
 
         block->codeGen(context);
         if (!context.currentBlock()->returned) {
-            llvm::ReturnInst::Create(context.context(), nullptr, context.currentBlock()->block);
+            context.builder().CreateRetVoid();
         }
 
         context.popBlock();
@@ -1355,8 +1353,7 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
     auto condValue = condfc->load(ctx);
 
     if (condValue->getType()->isPointerTy()) {
-        auto t = static_cast<llvm::PointerType *>(condValue->getType());
-        condValue = new llvm::ICmpInst(*ctx.currentBlock()->block, llvm::CmpInst::ICMP_NE, condValue, llvm::ConstantPointerNull::get(t));
+        condValue = ctx.builder().CreateIsNotNull(condValue);
     }
 
     auto curBlock = ctx.currentBlock();
@@ -1369,7 +1366,7 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
     block()->codeGen(ctx);
     bool ifReturned = ctx.currentBlock()->returned;
     if (!ifReturned) {
-        llvm::BranchInst::Create(afterblock, ctx.currentBlock()->block);
+        ctx.builder().CreateBr(afterblock);
     }
     condition()->popConstraints();
     ctx.popBlock();
@@ -1385,7 +1382,7 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
         }
         elseBlock()->codeGen(ctx);
         if (!ctx.currentBlock()->returned) {
-            llvm::BranchInst::Create(afterblock, ctx.currentBlock()->block);
+            ctx.builder().CreateBr(afterblock);
         }
         if (!ifReturned) {
             condition()->popConstraints();
@@ -1393,9 +1390,10 @@ Optional<Value> NIfStatement::codeGen(CodeGenContext &ctx)
         ctx.popBlock();
     }
 
-    llvm::BranchInst::Create(ifblock, elseblock ? elseblock : afterblock, condValue, ctx.currentBlock()->block);
+    ctx.builder().CreateCondBr(condValue, ifblock, elseblock ? elseblock : afterblock);
 
     ctx.currentBlock()->block = afterblock;
+    ctx.builder().SetInsertPoint(afterblock);
 
     return {};
 }
@@ -1409,19 +1407,20 @@ Optional<Value> NWhileStatement::codeGen(CodeGenContext &ctx)
 
     ctx.pushBlock(condblock, curBlock->function, curBlock);
     auto cond = condition()->codeGen(ctx)->getSpecialization<FirstClassValue>()->load(ctx);
-    llvm::BranchInst::Create(whileblock, afterblock, cond, ctx.currentBlock()->block);
+    ctx.builder().CreateCondBr(cond, whileblock, afterblock);
     ctx.popBlock();
 
     ctx.pushBlock(whileblock, curBlock->function, curBlock);
     block()->codeGen(ctx);
     if (!ctx.currentBlock()->returned) {
-        llvm::BranchInst::Create(condblock, ctx.currentBlock()->block);
+        ctx.builder().CreateBr(condblock);
     }
     ctx.popBlock();
 
-    llvm::BranchInst::Create(condblock, ctx.currentBlock()->block);
+    ctx.builder().CreateBr(condblock);
 
     ctx.currentBlock()->block = afterblock;
+    ctx.builder().SetInsertPoint(afterblock);
 
     return {};
 }
@@ -1493,16 +1492,16 @@ Optional<Value> NCastExpression::codeGen(CodeGenContext &ctx)
         if (type->isIntegerTy()) {
             if (castType->isIntegerTy()) {
                 fmt::print("int \n");
-                return createValue(ctx, new llvm::TruncInst(firstclass->load(ctx), m_type.get(ctx), "", ctx.currentBlock()->block), m_type);
+                return createValue(ctx, ctx.builder().CreateTrunc(firstclass->load(ctx), m_type.get(ctx)), m_type);
             } else if (castType->isFloatingPointTy()) {
-                auto val = new llvm::SIToFPInst(firstclass->load(ctx), m_type.get(ctx), "", ctx.currentBlock()->block);
+                auto val = ctx.builder().CreateSIToFP(firstclass->load(ctx), m_type.get(ctx));
                 val->getType()->dump();
                 return createValue(ctx, val, m_type);
             }
         } else if (type->isFloatingPointTy()) {
             if (castType->isIntegerTy()) {
                 firstclass->value()->dump();
-                auto val = new llvm::FPToSIInst(firstclass->load(ctx), m_type.get(ctx), "", ctx.currentBlock()->block);
+                auto val = ctx.builder().CreateFPToSI(firstclass->load(ctx), m_type.get(ctx));
                 return createValue(ctx, val, m_type);
             }
         }

@@ -78,6 +78,7 @@ public:
 
     bool isFunctionNameAvailable(const std::string &name) const;
 
+    llvm::IRBuilder<> &builder() { return m_builder; }
     llvm::LLVMContext &context() { return m_context; }
     llvm::Module &module() { return *m_module.get(); }
     const llvm::Module &module() const { return *m_module.get(); }
@@ -136,6 +137,7 @@ private:
     llvm::Function *m_mainFunction;
     llvm::LLVMContext m_context;
     std::unique_ptr<llvm::Module> m_module;
+    llvm::IRBuilder<> m_builder;
     std::unordered_map<std::string, StructInfo> m_structInfo;
     std::unordered_map<llvm::Type *, StructInfo *> m_structInfoByType;
     std::unordered_map<std::string, UnionInfo> m_unionInfo;
