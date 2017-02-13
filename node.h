@@ -154,6 +154,7 @@ public:
         NotEqual,
         GreaterEqual,
         LesserEqual,
+        Or,
     };
 
     OP op;

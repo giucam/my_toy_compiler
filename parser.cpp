@@ -42,6 +42,7 @@ static int opPrecedence(Token::Type t)
         case Token::Type::RightAngleBracket: return 10;
         case Token::Type::CompareEqual: return 5;
         case Token::Type::CompareNotEqual: return 5;
+        case Token::Type::DoublePipe: return 1;
         default:
             break;
     }
@@ -70,6 +71,7 @@ std::unique_ptr<NExpression> Parser::parseBinOp(std::unique_ptr<NExpression> lhs
                 case Token::Type::RightAngleBracket: return NBinaryOperator::OP::Greater;
                 case Token::Type::CompareEqual: return NBinaryOperator::OP::Equal;
                 case Token::Type::CompareNotEqual: return NBinaryOperator::OP::NotEqual;
+                case Token::Type::DoublePipe: return NBinaryOperator::OP::Or;
                 default:
                     abort();
             }
@@ -198,6 +200,7 @@ std::unique_ptr<NExpression> Parser::parseExpression(NExpression *context)
                 expr = std::make_unique<NAssignment>(tok, std::move(expr), std::move(rhs));
                 break;
             }
+            case Token::Type::DoublePipe:
             case Token::Type::LeftAngleBracket:
             case Token::Type::RightAngleBracket:
             case Token::Type::CompareEqual:

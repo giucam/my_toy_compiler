@@ -275,7 +275,10 @@ Token Lexer::readNextToken()
             nextChar();
             return token(Token::Type::RightAngleBracket);
         } else if (m_lastChar == '|') {
-            nextChar();
+            if (nextChar() == '|') {
+                nextChar();
+                return token(Token::Type::DoublePipe);
+            }
             return token(Token::Type::Pipe);
         } else if (m_lastChar == '$') {
             nextChar();

@@ -18,6 +18,7 @@ static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type 
             case NBinaryOperator::OP::Greater: return llvm::CmpInst::ICMP_SGT;
             case NBinaryOperator::OP::GreaterEqual: return llvm::CmpInst::ICMP_SGE;
             case NBinaryOperator::OP::LesserEqual: return llvm::CmpInst::ICMP_SLE;
+            case NBinaryOperator::OP::Or: return llvm::Instruction::Or;
         }
         return -1;
     }();
@@ -29,6 +30,7 @@ static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type 
                 err(token, "divisor value is of type '{}' and may be 0; guard the operation with an if statement", rhsType.name());
             }
         } //fallthrough
+        case NBinaryOperator::OP::Or:
         case NBinaryOperator::OP::Add:
         case NBinaryOperator::OP::Mul:
         case NBinaryOperator::OP::Sub: {
@@ -84,6 +86,7 @@ static llvm::Value *floatBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, NBi
         case NBinaryOperator::OP::Sub:
         case NBinaryOperator::OP::Div:
         case NBinaryOperator::OP::Remainder:
+        case NBinaryOperator::OP::Or:
             return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:
@@ -119,6 +122,7 @@ static llvm::Value *pointerBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue, N
         case NBinaryOperator::OP::Sub:
         case NBinaryOperator::OP::Div:
         case NBinaryOperator::OP::Remainder:
+        case NBinaryOperator::OP::Or:
             return llvm::BinaryOperator::Create((llvm::Instruction::BinaryOps)instr, lhsValue, rhsValue, "", ctx.currentBlock()->block);
         case NBinaryOperator::OP::Equal:
         case NBinaryOperator::OP::NotEqual:

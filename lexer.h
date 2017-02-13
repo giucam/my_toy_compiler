@@ -51,6 +51,7 @@ public:
         LeftAngleBracket,
         RightAngleBracket,
         Pipe,
+        DoublePipe,
         Dollar,
         True,
         False,
@@ -121,6 +122,7 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(LeftAngleBracket, "'<'")
         TOKSTR(RightAngleBracket, "'>'")
         TOKSTR(Pipe, "'|'")
+        TOKSTR(DoublePipe, "'||'")
         TOKSTR(Dollar, "'$'")
         TOKSTR(True, "'true'")
         TOKSTR(False, "'false'")
