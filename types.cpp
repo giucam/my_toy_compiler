@@ -271,12 +271,33 @@ TypeConstraint TypeConstraint::operator+(const TypeConstraint &other) const
     return result;
 }
 
+
+
+Value Type::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Value &storeValue) const
+{
+    return m_iface->create(ctx, alloc, name, *this, storeValue);
+}
+
+Value Type::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name) const
+{
+    return m_iface->create(ctx, alloc, name, *this, Value());
+}
+
+
+
+
 llvm::Type *VoidType::get(CodeGenContext &ctx) const
 {
     return llvm::Type::getVoidTy(ctx.context());
 }
 
 std::string VoidType::name() const { return "void"; }
+
+Value VoidType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    throw CreateError { CreateError::Err::TypeError };
+}
+
 
 
 llvm::Type *IntegerType::get(CodeGenContext &ctx) const
@@ -303,6 +324,44 @@ long long IntegerType::minValue() const
     return 0;
 }
 
+static bool canStoreInto(CodeGenContext &ctx, const Type &lhs, const Type &rhs)
+{
+    if (lhs.get(ctx) != rhs.get(ctx) || !rhs.typeConstraint().isCompatibleWith(lhs.typeConstraint())) {
+        return false;
+    }
+    if (auto lp = lhs.getSpecialization<PointerType>()) {
+        auto rp = rhs.getSpecialization<PointerType>();
+        return canStoreInto(ctx, lp->pointerElementType(), rp->pointerElementType());
+    }
+    return true;
+}
+
+static Value createFirstClassValue(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue)
+{
+    auto t = type.get(ctx);
+    auto val = alloc->allocate(t, name);
+    if (storeValue.isValid()) {
+        auto fc = storeValue.getSpecialization<FirstClassValue>();
+
+        auto storeTy = fc->type();
+        while (storeTy.get(ctx) != fc->value()->getType()) {
+            storeTy = storeTy.getPointerTo();
+        }
+        auto store = ctx.convertTo(fc->value(), storeTy, type);
+        if (!store || !canStoreInto(ctx, type, fc->type())) {
+            throw CreateError { CreateError::Err::StoreError };
+        }
+        ctx.builder().CreateStore(store, val);
+    }
+
+    return createValue(ctx, val, type);
+}
+
+Value IntegerType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    return createFirstClassValue(ctx, alloc, name, type, storeValue);
+}
+
 
 llvm::Type *FloatingType::get(CodeGenContext &ctx) const
 {
@@ -327,6 +386,12 @@ std::string FloatingType::name() const
     return std::string("f") + std::to_string(m_bits);
 }
 
+Value FloatingType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    return createFirstClassValue(ctx, alloc, name, type, storeValue);
+}
+
+
 
 llvm::Type *PointerType::get(CodeGenContext &ctx) const
 {
@@ -341,6 +406,11 @@ std::string PointerType::name() const
 Type PointerType::pointerElementType() const
 {
     return m_type;
+}
+
+Value PointerType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    return createFirstClassValue(ctx, alloc, name, type, storeValue);
 }
 
 
@@ -369,6 +439,12 @@ std::string FunctionPointerType::name() const
     return n;
 }
 
+Value FunctionPointerType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    abort();
+}
+
+
 
 llvm::Type *ArrayType::get(CodeGenContext &ctx) const
 {
@@ -381,6 +457,12 @@ std::string ArrayType::name() const
     return m_type.name() + "[" + std::to_string(m_num) + "]";
 }
 
+Value ArrayType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    abort();
+}
+
+
 
 llvm::Type *ArgumentPackType::get(CodeGenContext &ctx) const
 {
@@ -392,6 +474,11 @@ std::string ArgumentPackType::name() const
     return "(...)";
 }
 
+Value ArgumentPackType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    abort();
+}
+
 
 class LlvmType
 {
@@ -401,6 +488,11 @@ public:
 
     llvm::Type *get(CodeGenContext &ctx) const { return m_type; }
     std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+    {
+        return createFirstClassValue(ctx, alloc, name, type, storeValue);
+    }
 
 private:
     llvm::Type *m_type;
@@ -429,6 +521,86 @@ std::string TupleType::name() const
     return n;
 }
 
+Value TupleType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    std::vector<Value> values;
+    auto pack = storeValue.getSpecialization<PackValue>();
+    if (!pack) {
+        throw CreateError { CreateError::Err::StoreError };
+    }
+
+    auto &storeValues = pack->unpack();
+    for (size_t i = 0; i < m_types.size(); ++i) {
+        values.push_back(m_types[i].create(ctx, alloc, name + "#" + std::to_string(i), storeValues[i]));
+    }
+
+    return TupleValue(values);
+}
+
+StructType::StructType(const std::string &n)
+          : m_name(n)
+          , m_type(nullptr)
+{
+}
+
+StructType::StructType(llvm::StructType *type)
+          : m_name(type->getName())
+          , m_type(type)
+{
+}
+
+llvm::Type *StructType::get(CodeGenContext &ctx) const
+{
+    if (!m_type) {
+        if (auto t = ctx.declaredType(m_name)) {
+            m_type = static_cast<llvm::StructType *>(t);
+        }
+        if (!m_type) {
+            fmt::print("CREATE TYPE {}\n",m_name);
+            m_type = llvm::StructType::create(ctx.context(), m_name.c_str());
+            ctx.addDeclaredType(m_name, m_type);
+        }
+    }
+    return m_type;
+}
+
+std::string StructType::name() const
+{
+    return m_name;
+}
+
+Value StructType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    auto info = ctx.structInfo(get(ctx));
+
+    llvm::Value *sizeValue = nullptr;
+    if (info->sizeValue.isValid()) {
+        sizeValue = info->sizeValue.getSpecialization<FirstClassValue>()->load(ctx);
+    }
+
+    llvm::Value *val;
+    if (sizeValue) {
+        val = alloc->allocateSized(m_type, sizeValue, name);
+    } else {
+        val = alloc->allocate(m_type, name);
+    }
+
+    if (storeValue.isValid()) {
+        auto fc = storeValue.getSpecialization<FirstClassValue>();
+
+        auto storeTy = fc->type();
+        while (storeTy.get(ctx) != fc->value()->getType()) {
+            storeTy = storeTy.getPointerTo();
+        }
+        auto store = ctx.convertTo(fc->value(), storeTy, type);
+        if (!store || !canStoreInto(ctx, type, fc->type())) {
+            throw CreateError { CreateError::Err::StoreError };
+        }
+        ctx.builder().CreateStore(store, val);
+    }
+
+    return structValue(type, val, info, ctx);
+}
 
 llvm::Type *CustomType::get(CodeGenContext &ctx) const
 {
@@ -444,13 +616,19 @@ std::string CustomType::name() const
     return m_name;
 }
 
+Value CustomType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    auto t = get(ctx);
+    return llvmType(ctx, t).create(ctx, alloc, name, storeValue);
+}
+
 
 std::string LlvmType::name() const
 {
     return typeName(m_type);
 }
 
-Type llvmType(llvm::Type *t)
+Type llvmType(CodeGenContext &ctx, llvm::Type *t)
 {
     int ptr = 0;
     while (t->isPointerTy()) {
@@ -458,7 +636,16 @@ Type llvmType(llvm::Type *t)
         t = t->getPointerElementType();
     }
 
-    Type result = LlvmType(t);
+    Type result = [&]() -> Type {
+        if (t->isStructTy()) {
+            auto st = static_cast<llvm::StructType *>(t);
+            if (ctx.structInfo(st)) {
+                return StructType(st);
+            }
+        }
+        return LlvmType(t);
+    }();
+
     while (ptr > 0) {
         result = result.getPointerTo();
         --ptr;

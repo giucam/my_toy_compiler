@@ -10,8 +10,12 @@
 
 namespace llvm {
     class Type;
+    class StructType;
 }
 
+class Value;
+class Allocator;
+class StructInfo;
 class CodeGenContext;
 
 class TypeConstraint
@@ -52,27 +56,12 @@ private:
 
 class Type
 {
-    struct IfaceBase {
-        virtual ~IfaceBase() {}
-        virtual llvm::Type *get(CodeGenContext &ctx) const = 0;
-        virtual std::string name() const = 0;
-        void (*magic)();
-    };
-    template<class T>
-    struct Iface : IfaceBase {
-        Iface(T d) : data(std::move(d)) { magic = T::magic; }
-        llvm::Type *get(CodeGenContext &ctx) const override { return data.get(ctx); }
-        std::string name() const override { return data.name(); }
-        T data;
-    };
-
 public:
     Type() {}
     template<class T>
-    Type(T handler)
-        : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
+    Type(T handler);
 
-    inline llvm::Type *get(CodeGenContext &ctx) const { return m_iface->get(ctx); }
+    llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
     bool isValid() const { return m_iface.get(); }
@@ -80,25 +69,33 @@ public:
     Type getPointerTo() const;
 
     template<class T>
-    const T *getSpecialization() const
-    {
-        if (T::magic == m_iface->magic) {
-            return &static_cast<const Iface<T> *>(m_iface.get())->data;
-        }
-        return nullptr;
-    }
+    const T *getSpecialization() const;
 
     void setTypeConstraint(const TypeConstraint &c);
     const TypeConstraint &typeConstraint() const { return m_constraint; }
     TypeConstraint &typeConstraint() { return m_constraint; }
 
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Value &storeValue) const;
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name) const;
+
 private:
+    struct IfaceBase;
+    template<class T> struct Iface;
     std::shared_ptr<const IfaceBase> m_iface;
     TypeConstraint m_constraint;
 };
 #define TYPE_SPECIALIZATION \
 static void magic() { } \
 friend class Type;
+
+struct CreateError
+{
+    enum class Err {
+        StoreError,
+        TypeError,
+    };
+    Err error;
+};
 
 class IntegerType
 {
@@ -111,6 +108,8 @@ public:
 
     long long maxValue() const;
     long long minValue() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
 
 private:
     bool m_signed;
@@ -126,6 +125,8 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
 private:
     int m_bits;
 };
@@ -138,6 +139,8 @@ public:
 
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
 };
 
 class PointerType
@@ -148,6 +151,8 @@ public:
 
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
 
     Type pointerElementType() const;
 
@@ -164,6 +169,8 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
 private:
     Type m_ret;
     std::vector<Type> m_args;
@@ -178,6 +185,8 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
 private:
     Type m_type;
     int m_num;
@@ -191,6 +200,8 @@ public:
 
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
 };
 
 class TupleType
@@ -204,8 +215,27 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
 private:
     std::vector<Type> m_types;
+};
+
+class StructType
+{
+    TYPE_SPECIALIZATION
+public:
+    StructType(const std::string &name);
+    StructType(llvm::StructType *type);
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
+private:
+    std::string m_name;
+    mutable llvm::StructType *m_type;
 };
 
 class CustomType
@@ -217,11 +247,50 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
 private:
     Token m_token;
     std::string m_name;
 };
 
-Type llvmType(llvm::Type *t);
+Type llvmType(CodeGenContext &ctx, llvm::Type *t);
+
+
+#include "value.h"
+
+struct Type::IfaceBase {
+    virtual ~IfaceBase() {}
+    virtual llvm::Type *get(CodeGenContext &ctx) const = 0;
+    virtual std::string name() const = 0;
+    virtual Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const = 0;
+    void (*magic)();
+};
+template<class T>
+struct Type::Iface : Type::IfaceBase {
+    Iface(T d) : data(std::move(d)) { magic = T::magic; }
+    llvm::Type *get(CodeGenContext &ctx) const override { return data.get(ctx); }
+    std::string name() const override { return data.name(); }
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const override
+    {
+        return data.create(ctx, alloc, name, type, storeValue);
+    }
+    T data;
+};
+
+template<class T>
+inline Type::Type(T handler)
+    : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
+
+inline llvm::Type *Type::get(CodeGenContext &ctx) const { return m_iface->get(ctx); }
+
+template<class T>
+inline const T *Type::getSpecialization() const
+{
+    if (T::magic == m_iface->magic) {
+        return &static_cast<const Iface<T> *>(m_iface.get())->data;
+    }
+    return nullptr;
+}
 
 #endif

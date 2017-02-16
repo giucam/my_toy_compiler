@@ -5,6 +5,30 @@
 #include "codegen.h"
 #include "common.h"
 
+Value::Value(const std::shared_ptr<IfaceBase> &iface, Flags flags)
+     : m_iface(iface), m_flags((int)flags) {}
+
+void Value::setBindingPoint(const ValueBindingPoint &bp)
+{
+    m_iface->bindingPoint = bp;
+}
+
+const Optional<ValueBindingPoint> &Value::bindingPoint() const
+{
+    return m_iface->bindingPoint;
+}
+
+Type &Value::type()
+{
+    return m_iface->type();
+}
+
+const Type &Value::type() const
+{
+    return m_iface->type();
+}
+
+
 Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType, bool mut)
 {
     auto type = valueType.get(ctx);
@@ -195,7 +219,7 @@ const std::vector<Value> &TupleValueH::unpack() const
         } else {
             val = llvm::ExtractValueInst::Create(v, llvm::makeArrayRef((unsigned)id), "", m_ctx.currentBlock()->block);
         }
-        values.push_back(createValue(m_ctx, val, llvmType(val->getType())));
+        values.push_back(createValue(m_ctx, val, llvmType(m_ctx, val->getType())));
     }
 
     return values;

@@ -6,7 +6,6 @@
 #include <vector>
 #include <memory>
 
-#include "types.h"
 #include "common.h"
 
 namespace llvm {
@@ -18,6 +17,7 @@ class CodeGenContext;
 class StructInfo;
 class TupleInfo;
 class UnionInfo;
+class Type;
 
 class OutOfRangeException
 {
@@ -35,6 +35,50 @@ public:
     std::string type;
 };
 
+class ValueSpecialization;
+class ValueBindingPoint;
+
+class Value
+{
+    struct IfaceBase;
+    template<class T> struct Iface;
+public:
+    enum class Flags
+    {
+        None = 0,
+        Mutable = 1,
+    };
+
+    Value() {}
+    template<class T>
+    Value(T handler, Flags flags = Flags::None);
+    Value(const std::shared_ptr<IfaceBase> &iface, Flags flags = Flags::None);
+
+    void setMutable(bool m);
+    bool isMutable() const { return m_flags & (int)Flags::Mutable; }
+
+    void setBindingPoint(const ValueBindingPoint &bp);
+    const Optional<ValueBindingPoint> &bindingPoint() const;
+
+    Type &type();
+    const Type &type() const;
+
+    template<class T>
+    T *getSpecialization() const;
+
+    bool isValid() const { return m_iface.get(); }
+
+private:
+    std::shared_ptr<IfaceBase> m_iface;
+    int m_flags;
+};
+
+#define VALUE_SPECIALIZATION \
+static void magic() { } \
+friend class Value;
+
+#include "types.h"
+
 class ValueBindingPoint
 {
 public:
@@ -47,69 +91,36 @@ private:
     Type m_type;
 };
 
-class ValueSpecialization;
-
-class Value
+struct Value::IfaceBase
 {
-    struct IfaceBase
-    {
-        virtual ~IfaceBase() {}
-        virtual Type &type() = 0;
-        virtual const Type &type() const = 0;
-        ValueSpecialization *handlerBase;
-        Optional<ValueBindingPoint> bindingPoint;
-    };
-    template<class T>
-    struct Iface : IfaceBase
-    {
-        Iface(T h) : handler(std::move(h)) { handlerBase = &handler; }
-        Type &type() override { return handler.type(); }
-        const Type &type() const override { return handler.type(); }
-        T handler;
-    };
-
-public:
-    enum class Flags
-    {
-        None = 0,
-        Mutable = 1,
-    };
-
-    Value() {}
-    template<class T>
-    Value(T handler, Flags flags = Flags::None)
-        : m_iface(std::make_shared<Iface<T>>(std::move(handler))), m_flags((int)flags) {}
-    Value(const std::shared_ptr<IfaceBase> &iface, Flags flags = Flags::None)
-        : m_iface(iface), m_flags((int)flags) {}
-
-    void setMutable(bool m);
-    bool isMutable() const { return m_flags & (int)Flags::Mutable; }
-
-    void setBindingPoint(const ValueBindingPoint &bp) { m_iface->bindingPoint = bp; }
-    const Optional<ValueBindingPoint> &bindingPoint() const { return m_iface->bindingPoint; }
-
-    inline Type &type() { return m_iface->type(); }
-    inline const Type &type() const { return m_iface->type(); }
-
-    template<class T>
-    T *getSpecialization() const
-    {
-        if (!m_iface) {
-            return nullptr;
-        }
-        return dynamic_cast<T *>(m_iface->handlerBase);
-    }
-
-    bool isValid() const { return m_iface.get(); }
-
-private:
-    std::shared_ptr<IfaceBase> m_iface;
-    int m_flags;
+    virtual ~IfaceBase() {}
+    virtual Type &type() = 0;
+    virtual const Type &type() const = 0;
+    ValueSpecialization *handlerBase;
+    Optional<ValueBindingPoint> bindingPoint;
+};
+template<class T>
+struct Value::Iface : Value::IfaceBase
+{
+    Iface(T h) : handler(std::move(h)) { handlerBase = &handler; }
+    Type &type() override { return handler.type(); }
+    const Type &type() const override { return handler.type(); }
+    T handler;
 };
 
-#define VALUE_SPECIALIZATION \
-static void magic() { } \
-friend class Value;
+template<class T>
+inline Value::Value(T handler, Flags flags)
+     : m_iface(std::make_shared<Iface<T>>(std::move(handler))), m_flags((int)flags) {}
+
+template<class T>
+T *Value::getSpecialization() const
+{
+    if (!m_iface) {
+        return nullptr;
+    }
+    return dynamic_cast<T *>(m_iface->handlerBase);
+}
+
 
 class ValueSpecialization
 {

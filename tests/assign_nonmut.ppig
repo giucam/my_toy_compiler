@@ -1,0 +1,7 @@
+
+func main(): i32
+{
+    let foo = 4;
+    foo = 5;
+    return 0;
+}

@@ -74,6 +74,15 @@ struct FunctionInfo {
     Type returnType;
 };
 
+class Allocator
+{
+public:
+    ~Allocator() {}
+
+    virtual llvm::Value *allocate(llvm::Type *ty, const std::string &name) = 0;
+    virtual llvm::Value *allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name) = 0;
+};
+
 class Debug
 {
 public:
@@ -154,8 +163,6 @@ public:
     void popBlock();
 
     llvm::Value *convertTo(llvm::Value *value, const Type &from, const Type &to);
-
-    llvm::Value *allocate(llvm::Type *type, const std::string &name, llvm::Value *toStore);
 
     bool addDeclaredType(const std::string &name, llvm::Type *type);
     llvm::Type *declaredType(const std::string &name) const;
