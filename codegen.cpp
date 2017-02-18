@@ -8,27 +8,6 @@
 // #include "parser.hpp"
 #include "common.h"
 
-class StackAllocator : public Allocator
-{
-public:
-    StackAllocator(CodeGenContext &ctx)
-        : m_ctx(ctx)
-    {}
-
-    llvm::Value *allocate(llvm::Type *ty, const std::string &name) override
-    {
-        return m_ctx.builder().CreateAlloca(ty, nullptr, name.c_str());
-    }
-    llvm::Value *allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name) override
-    {
-        llvm::Value *alloc = m_ctx.builder().CreateAlloca(llvm::IntegerType::get(m_ctx.context(), 8), sizeValue);
-        return m_ctx.builder().CreateBitCast(alloc, ty->getPointerTo(), name.c_str());
-    }
-
-private:
-    CodeGenContext &m_ctx;
-};
-
 Debug::Debug(CodeGenContext *ctx, const std::string &filename)
      : m_ctx(ctx)
      , m_builder(ctx->module())
@@ -733,7 +712,11 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
     }
 
     if (name == "count") {
-        return constantInteger(context, values.size());
+        // if we have more than one argument return the number of them, otherwise do nothing, in
+        // case there is a function named count taking that argument
+        if (values.size() > 1) {
+            return constantInteger(context, values.size());
+        }
     } else if (name == "size") {
         if (values.size() != 1) {
             err(token(), "the built-in function 'size' accepts only one argument");
@@ -760,6 +743,16 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
         function = context.functionTemplate(name, firstclasses);
     }
 
+    if (!function) {
+        auto mangledName = name;
+        for (auto &&v: values) {
+            mangledName += "_";
+            mangledName += v.type().typeName();
+        }
+
+        function = context.module().getFunction(mangledName.c_str());
+    }
+
     if (function == NULL) {
         err(token(), "no such function '{}'", name);
     }
@@ -768,16 +761,13 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
 
     size_t i = 0;
     auto info = context.functionInfo(function);
-    for (auto &&arg: function->getArgumentList()) {
-        auto argTy = arg.getType();
-
+    for (; i < function->getArgumentList().size(); ++i) {
         auto converted = context.convertTo(firstclasses[i]->value(), firstclasses[i]->type(), info->argTypes[i]);
         if (!converted) {
-            err(token(), "wrong argument type to function; expected '{}', found '{}'", typeName(argTy), typeName(firstclasses[i]->value()->getType()));
+            err(token(), "wrong argument type to function; expected '{}', found '{}'", info->argTypes[i].name(), firstclasses[i]->type().name());
         }
 
         vals.push_back(converted);
-        i++;
     }
     if (function->isVarArg()) {
         for (; i < values.size(); ++i) {
@@ -1042,8 +1032,6 @@ Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
         numFields = info->fields.size();
     } else if (auto i = ctx.unionInfo(t)) {
         numFields = i->fields.size();
-    } else {
-        error("boo {}", name);
     }
 
     StackAllocator allocator(ctx);

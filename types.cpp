@@ -16,6 +16,11 @@ std::string Type::name() const
     return m_iface->name() + m_constraint.name();
 }
 
+std::string Type::typeName() const
+{
+    return m_iface->name();
+}
+
 void Type::setTypeConstraint(const TypeConstraint &c)
 {
     m_constraint = c;
@@ -651,4 +656,129 @@ Type llvmType(CodeGenContext &ctx, llvm::Type *t)
         --ptr;
     }
     return result;
+}
+
+
+
+DynamicArrayType::DynamicArrayType(const Type &t)
+                : m_elmType(t)
+{
+}
+
+std::string DynamicArrayType::name() const
+{
+    return std::string("[") + m_elmType.name() + std::string("]");
+}
+
+llvm::Type *DynamicArrayType::get(CodeGenContext &ctx) const
+{
+    auto elmType = m_elmType.get(ctx);
+    llvm::Type *types[] = { elmType->getPointerTo(), //data pointer
+                            ctx.builder().getInt32Ty(), //used
+                            ctx.builder().getInt32Ty() //allocated
+                          };
+    auto type = llvm::StructType::get(ctx.context(), llvm::makeArrayRef(types, 3));
+
+    auto appendName = std::string("append_") + name() + "_" + m_elmType.name();
+    if (!ctx.module().getFunction(appendName.c_str())) {
+        llvm::DataLayout layout(&ctx.module());
+        int elmSize = layout.getTypeSizeInBits(elmType) / 8;
+
+        auto callBaseLibFunc = [&](const char *name, const std::vector<llvm::Value *> &args, llvm::Type *retType) -> llvm::Value * {
+            auto func = ctx.module().getFunction(name);
+            if (!func) {
+                std::vector<llvm::Type *> types;
+                for (auto &&a: args) {
+                    types.push_back(a->getType());
+                }
+                llvm::FunctionType *ftype = llvm::FunctionType::get(retType, llvm::makeArrayRef(types), false);
+                func = llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, name, &ctx.module());
+            }
+            return ctx.builder().CreateCall(func, llvm::makeArrayRef(args));
+        };
+
+        auto builtinFunction = [&](const std::string &name, const std::vector<Type> types, const Type &retType, const std::function<void (const std::vector<Value> &values)> &block)
+        {
+            std::vector<llvm::Type *> argTypes;
+            for (auto &&t: types) {
+                argTypes.push_back(t.get(ctx));
+            }
+
+            llvm::FunctionType *ftype = llvm::FunctionType::get(retType.get(ctx), llvm::makeArrayRef(argTypes), false);
+            llvm::Function *function = llvm::Function::Create(ftype, llvm::GlobalValue::InternalLinkage, name.c_str(), &ctx.module());
+
+            auto info = ctx.addFunctionInfo(function);
+            info->argTypes = types;
+            info->returnType = retType;
+
+            StackAllocator allocator(ctx);
+            llvm::BasicBlock *bblock = llvm::BasicBlock::Create(ctx.context(), "entry", function, 0);
+            ctx.pushBlock(bblock, function, nullptr);
+
+            llvm::Function::arg_iterator argsValues = function->arg_begin();
+            std::vector<Value> values;
+            for (auto &&t: types) {
+                values.push_back(t.create(ctx, &allocator, "", createValue(ctx, &*argsValues++, t)));
+            }
+
+            block(values);
+
+            ctx.popBlock();
+        };
+
+        // we use llvmType here instead of *this, because otherwise when calling get() on Type(*this) inside builtinFunction we
+        // would reenter this function, and since the append function is not created yet we would start an infinite loop
+        builtinFunction(appendName, { llvmType(ctx, type).getPointerTo(), m_elmType }, VoidType(), [&](const std::vector<Value> &values) {
+            std::vector<llvm::Value *> vals;
+            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
+            vals.push_back(values[1].getSpecialization<FirstClassValue>()->value());
+            vals.push_back(ctx.builder().getInt32(elmSize));
+
+            callBaseLibFunc("__base_lib__vector_append", vals, ctx.builder().getVoidTy());
+            ctx.builder().CreateRetVoid();
+        });
+
+        auto clearName = std::string("clear_") + name();
+        builtinFunction(clearName, { Type(*this).getPointerTo() }, VoidType(), [&](const std::vector<Value> &values) {
+            std::vector<llvm::Value *> vals;
+            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
+
+            callBaseLibFunc("__base_lib__vector_clear", vals, ctx.builder().getVoidTy());
+            ctx.builder().CreateRetVoid();
+        });
+
+        auto opName = std::string("operator[]_") + name() + "_i32";
+        builtinFunction(opName, { Type(*this).getPointerTo(), IntegerType(true, 32) }, m_elmType.getPointerTo(), [&](const std::vector<Value> &values) {
+            std::vector<llvm::Value *> vals;
+            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
+            vals.push_back(ctx.builder().getInt32(elmSize));
+            vals.push_back(values[1].getSpecialization<FirstClassValue>()->load(ctx));
+
+            llvm::Value *ret = callBaseLibFunc("__base_lib__vector_element", vals, ctx.builder().getInt8PtrTy());
+            ret = ctx.builder().CreateBitCast(ret, elmType->getPointerTo());
+            ctx.builder().CreateRet(ret);
+        });
+
+        auto countName = std::string("count_") + name();
+        builtinFunction(countName, { Type(*this).getPointerTo() }, IntegerType(true, 32), [&](const std::vector<Value> &values) {
+            std::vector<llvm::Value *> vals;
+            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
+
+            llvm::Value *ret = callBaseLibFunc("__base_lib__vector_count", vals, ctx.builder().getInt32Ty());
+            ctx.builder().CreateRet(ret);
+        });
+    }
+
+    return type;
+}
+
+Value DynamicArrayType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+{
+    auto t = static_cast<llvm::StructType *>(get(ctx));
+    auto val = alloc->allocate(t, name);
+
+    auto init = llvm::ConstantAggregateZero::get(t);
+    ctx.builder().CreateStore(init, val);
+
+    return simpleValue(val, type);
 }

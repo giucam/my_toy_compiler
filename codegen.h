@@ -193,4 +193,25 @@ private:
 
 std::string typeName(llvm::Type *ty);
 
+class StackAllocator : public Allocator
+{
+public:
+    StackAllocator(CodeGenContext &ctx)
+        : m_ctx(ctx)
+    {}
+
+    llvm::Value *allocate(llvm::Type *ty, const std::string &name) override
+    {
+        return m_ctx.builder().CreateAlloca(ty, nullptr, name.c_str());
+    }
+    llvm::Value *allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name) override
+    {
+        llvm::Value *alloc = m_ctx.builder().CreateAlloca(llvm::IntegerType::get(m_ctx.context(), 8), sizeValue);
+        return m_ctx.builder().CreateBitCast(alloc, ty->getPointerTo(), name.c_str());
+    }
+
+private:
+    CodeGenContext &m_ctx;
+};
+
 #endif

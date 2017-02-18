@@ -147,6 +147,7 @@ int main(int argc, char **argv)
         context.writeOutput(file);
         clangargs.push_back(strdup(file.c_str()));
     }
+    clangargs.push_back("baselib.cpp");
     clangargs.push_back(nullptr);
 
     execvp("clang", const_cast<char *const *>(clangargs.data()));

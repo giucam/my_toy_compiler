@@ -227,6 +227,17 @@ print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", aaa, tt.1, sss, "poop", 
 //     vptr = 4; // error
     vptr = 40; // ok
 
+
+    let vec: [i32] = {};
+    vec.append(4);
+    vec.append(98);
+    let mut i = 0;
+    while (i < vec.count()) {
+        print("vector element {}: {}\n", i, vec[i]);
+        i = i + 1;
+    }
+
+
     return gg;
 }
 

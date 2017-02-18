@@ -63,6 +63,7 @@ public:
 
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
+    std::string typeName() const;
 
     bool isValid() const { return m_iface.get(); }
 
@@ -236,6 +237,21 @@ public:
 private:
     std::string m_name;
     mutable llvm::StructType *m_type;
+};
+
+class DynamicArrayType
+{
+    TYPE_SPECIALIZATION
+public:
+    DynamicArrayType(const Type &elmType);
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
+private:
+    Type m_elmType;
 };
 
 class CustomType

@@ -165,6 +165,17 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
 
     if (expression) {
         expression->pushContext(context);
+
+        if (m_lexer.peekToken().type() == Token::Type::LeftBracket) {
+            nextToken();
+            auto ex = parseExpression(nullptr);
+            nextToken(Token::Type::RightBracket);
+            ExpressionList list;
+            list.push_back(std::move(expression));
+            list.push_back(std::move(ex));
+            expression = std::make_unique<NMethodCall>(tok, "operator[]", list);
+        }
+
         switch (m_lexer.peekToken().type()) {
             case Token::Type::Dot: {
                 nextToken();
@@ -701,6 +712,10 @@ Type Parser::parseType()
         nextToken();
 
         type = TupleType(types);
+    } else if (typeTok.type() == Token::Type::LeftBracket) {
+        auto t = parseType();
+        nextToken(Token::Type::RightBracket);
+        type = DynamicArrayType(t);
     } else {
         checkTokenType(typeTok, Token::Type::Identifier);
 
