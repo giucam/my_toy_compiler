@@ -248,7 +248,12 @@ public:
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
 
+    Type elementType() const { return m_elmType; }
+
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
+    Value dataPointer(CodeGenContext &ctx, const Value &arr) const;
+    Value count(CodeGenContext &ctx, const Value &arr) const;
 
 private:
     Type m_elmType;

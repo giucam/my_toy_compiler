@@ -1524,3 +1524,71 @@ Optional<Value> NCastExpression::codeGen(CodeGenContext &ctx)
     err(token(), "cannot cast value from type '{}' to '{}'", value->type().name(), m_type.name());
     return {};
 }
+
+NForStatement::NForStatement(const Token &itTok, const Token &exprTok, std::unique_ptr<NExpression> arrExpr, NBlock *block)
+             : NStatement(itTok)
+             , m_itToken(itTok)
+             , m_exprToken(exprTok)
+             , m_arrayExpr(std::move(arrExpr))
+             , m_block(block)
+{
+}
+
+Optional<Value> NForStatement::codeGen(CodeGenContext &ctx)
+{
+    auto curBlock = ctx.currentBlock();
+
+    auto arrayValue = m_arrayExpr->codeGen(ctx);
+    auto arrType = arrayValue->type().getSpecialization<DynamicArrayType>();
+    if (!arrType) {
+        err(m_exprToken, "cannot loop over the given expression");
+    }
+
+    StackAllocator alloc(ctx);
+
+    auto elmType = arrType->elementType();
+    auto it = elmType.create(ctx, &alloc, m_itToken.text());
+    auto itValue = it.getSpecialization<FirstClassValue>()->value();
+    ctx.storeLocal(m_itToken.text(), it);
+
+    //get a pointer to the start of the array and calculate a pointer to the end
+    auto ptr = elmType.getPointerTo().create(ctx, &alloc, "", arrType->dataPointer(ctx, arrayValue));
+    auto ptrValue = ptr.getSpecialization<FirstClassValue>()->value();
+    auto count = arrType->count(ctx, arrayValue);
+    auto endPtr = ctx.builder().CreateInBoundsGEP(ctx.builder().CreateLoad(ptrValue), count.getSpecialization<FirstClassValue>()->value());
+
+    llvm::BasicBlock *condblock = llvm::BasicBlock::Create(ctx.context(), "cond", curBlock->function, 0);
+    llvm::BasicBlock *forblock = llvm::BasicBlock::Create(ctx.context(), "for", curBlock->function, 0);
+    llvm::BasicBlock *afterblock = llvm::BasicBlock::Create(ctx.context(), "endfor", curBlock->function, 0);
+
+    ctx.pushBlock(condblock, curBlock->function, curBlock);
+
+    // if the pointer is equal to the end exit the loop
+    auto cond = ctx.builder().CreateICmpNE(ctx.builder().CreateLoad(ptrValue), endPtr);
+    ctx.builder().CreateCondBr(cond, forblock, afterblock);
+    ctx.popBlock();
+
+
+    ctx.pushBlock(forblock, curBlock->function, curBlock);
+
+    //store the value into the iterator variable
+    auto currPtr = ctx.builder().CreateLoad(ptrValue);
+    ctx.builder().CreateStore(ctx.builder().CreateLoad(currPtr), itValue);
+
+    m_block->codeGen(ctx);
+    // advance the pointer to the next element
+    auto newPtr = ctx.builder().CreateInBoundsGEP(currPtr, ctx.builder().getInt32(1));
+    ptrValue = ctx.builder().CreateStore(newPtr, ptrValue);
+    if (!ctx.currentBlock()->returned) {
+        ctx.builder().CreateBr(condblock);
+    }
+
+    ctx.popBlock();
+
+    ctx.builder().CreateBr(condblock);
+
+    ctx.currentBlock()->block = afterblock;
+    ctx.builder().SetInsertPoint(afterblock);
+
+    return {};
+}

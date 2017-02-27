@@ -111,6 +111,10 @@ Token Lexer::token(const std::string &str) const
         return token(Token::Type::Import);
     } else if (str == "as") {
         return token(Token::Type::As);
+    } else if (str == "for") {
+        return token(Token::Type::For);
+    } else if (str == "in") {
+        return token(Token::Type::In);
     }
 
     return token(Token::Type::Identifier);

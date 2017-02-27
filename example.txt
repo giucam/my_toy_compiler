@@ -237,6 +237,11 @@ print("arg 1: '{}', arg 2: '{}', ecc '{}' '{}' '{}'\n", aaa, tt.1, sss, "poop", 
         i = i + 1;
     }
 
+    vec.append(146);
+    for (i in vec) {
+        print("ranged for loop: {}\n", i);
+    }
+
 
     return gg;
 }

@@ -49,6 +49,7 @@ private:
     Type parseType();
     void parseIf();
     void parseWhile();
+    void parseFor();
     void parseImport(std::vector<Import> &imports);
     void dummyParseImport();
 

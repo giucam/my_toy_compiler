@@ -498,6 +498,23 @@ void Parser::parseWhile()
     m_block->statements.push_back(stmt);
 }
 
+void Parser::parseFor()
+{
+    nextToken(Token::Type::For);
+    nextToken(Token::Type::LeftParens);
+
+    auto idTok = nextToken(Token::Type::Identifier);
+    nextToken(Token::Type::In);
+    auto exprTok = m_lexer.peekToken();
+    auto array = parseExpression();
+
+    nextToken(Token::Type::RightParens);
+    auto block = parseBlock();
+
+    auto stmt = new NForStatement(idTok, exprTok, std::move(array), block);
+    m_block->statements.push_back(stmt);
+}
+
 void Parser::parseImport(std::vector<Import> &imports)
 {
     nextToken(Token::Type::Import);
@@ -589,6 +606,9 @@ void Parser::parseStatements()
             break;
         case Token::Type::While:
             parseWhile();
+            break;
+        case Token::Type::For:
+            parseFor();
             break;
         case Token::Type::Import:
             dummyParseImport();

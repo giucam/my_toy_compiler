@@ -513,4 +513,18 @@ private:
     Type m_type;
 };
 
+class NForStatement : public NStatement
+{
+public:
+    NForStatement(const Token &itToken, const Token &exprTok, std::unique_ptr<NExpression> arrayExpr, NBlock *block);
+
+    Optional<Value> codeGen(CodeGenContext &context) override;
+
+private:
+    Token m_itToken;
+    Token m_exprToken;
+    std::unique_ptr<NExpression> m_arrayExpr;
+    NBlock *m_block;
+};
+
 #endif

@@ -782,3 +782,16 @@ Value DynamicArrayType::create(CodeGenContext &ctx, Allocator *alloc, const std:
 
     return simpleValue(val, type);
 }
+
+Value DynamicArrayType::dataPointer(CodeGenContext &ctx, const Value &arr) const
+{
+    auto v = ctx.builder().CreateInBoundsGEP(arr.getSpecialization<FirstClassValue>()->value(), { ctx.builder().getInt32(0), ctx.builder().getInt32(0) });
+    return simpleValue(v, m_elmType.getPointerTo());
+}
+
+Value DynamicArrayType::count(CodeGenContext &ctx, const Value &arr) const
+{
+    auto v = ctx.builder().CreateInBoundsGEP(arr.getSpecialization<FirstClassValue>()->value(), { ctx.builder().getInt32(0), ctx.builder().getInt32(1) });
+    v = ctx.builder().CreateLoad(v);
+    return simpleValue(v, IntegerType(true, 32));
+}

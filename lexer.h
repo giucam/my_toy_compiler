@@ -57,6 +57,8 @@ public:
         False,
         Import,
         As,
+        For,
+        In,
     };
     Token() : m_lineno(0), m_columnno(0) {}
     Token(Type t, int l, int c, const std::string &filename, const std::string &txt, const std::string &line): m_type(t), m_lineno(l), m_columnno(c), m_filename(filename), m_line(line), m_text(txt) {}
@@ -128,6 +130,8 @@ inline std::ostream &operator<<(std::ostream &s, Token::Type t)
         TOKSTR(False, "'false'")
         TOKSTR(Import, "'import'")
         TOKSTR(As, "'as'")
+        TOKSTR(For, "'for'")
+        TOKSTR(In, "'in'")
     }
 #undef TOK
     return s;
