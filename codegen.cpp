@@ -324,19 +324,20 @@ void CodeGenContext::storeLocal(const std::string &name, Value value)
     currentBlock()->locals[name] = value;
 }
 
+Optional<Value> CodeGenBlock::local(const std::string &name) const
+{
+    auto it = locals.find(name);
+    if (it == locals.end()) {
+        return {};
+    }
+    return {it->second};
+}
+
 Optional<Value> CodeGenContext::local(const std::string &name) const
 {
-    auto valueInLocals = [&](const CodeGenBlock *block) -> Optional<Value> {
-        auto it = block->locals.find(name);
-        if (it == block->locals.end()) {
-            return {};
-        }
-        return {it->second};
-    };
-
     auto block = currentBlock();
     do {
-        auto val = valueInLocals(block);
+        auto val = block->local(name);
         if (val) {
             return val;
         }
@@ -1419,15 +1420,25 @@ Optional<Value> NWhileStatement::codeGen(CodeGenContext &ctx)
     llvm::BasicBlock *afterblock = llvm::BasicBlock::Create(ctx.context(), "endwhile", curBlock->function, 0);
 
     ctx.pushBlock(condblock, curBlock->function, curBlock);
+    ctx.debug().setLocation(token());
     auto cond = condition()->codeGen(ctx)->getSpecialization<FirstClassValue>()->load(ctx);
     ctx.builder().CreateCondBr(cond, whileblock, afterblock);
     ctx.popBlock();
 
     ctx.pushBlock(whileblock, curBlock->function, curBlock);
+    condition()->pushConstraints(false);
+    bool rootBlock = ctx.allocationBlock() == nullptr;
+    if (rootBlock) {
+        ctx.setAllocationBlock(curBlock);
+    }
     block()->codeGen(ctx);
+    if (rootBlock) {
+        ctx.setAllocationBlock(nullptr);
+    }
     if (!ctx.currentBlock()->returned) {
         ctx.builder().CreateBr(condblock);
     }
+    condition()->popConstraints();
     ctx.popBlock();
 
     ctx.builder().CreateBr(condblock);
@@ -1575,7 +1586,14 @@ Optional<Value> NForStatement::codeGen(CodeGenContext &ctx)
     auto currPtr = ctx.builder().CreateLoad(ptrValue);
     ctx.builder().CreateStore(ctx.builder().CreateLoad(currPtr), itValue);
 
+    bool rootBlock = ctx.allocationBlock() == nullptr;
+    if (rootBlock) {
+        ctx.setAllocationBlock(curBlock);
+    }
     m_block->codeGen(ctx);
+    if (rootBlock) {
+        ctx.setAllocationBlock(nullptr);
+    }
     // advance the pointer to the next element
     auto newPtr = ctx.builder().CreateInBoundsGEP(currPtr, ctx.builder().getInt32(1));
     ptrValue = ctx.builder().CreateStore(newPtr, ptrValue);
@@ -1591,4 +1609,24 @@ Optional<Value> NForStatement::codeGen(CodeGenContext &ctx)
     ctx.builder().SetInsertPoint(afterblock);
 
     return {};
+}
+
+
+
+llvm::Value *StackAllocator::allocate(llvm::Type *ty, const std::string &name)
+{
+    if (m_ctx.allocationBlock()) {
+        if (auto val = m_ctx.allocationBlock()->local(name)) {
+            return val->getSpecialization<FirstClassValue>()->value();
+        }
+        return new llvm::AllocaInst(ty, 0, name.c_str(), m_ctx.allocationBlock()->block);
+    }
+
+    return m_ctx.builder().CreateAlloca(ty, nullptr, name.c_str());
+}
+
+llvm::Value *StackAllocator::allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name)
+{
+    llvm::Value *alloc = m_ctx.builder().CreateAlloca(llvm::IntegerType::get(m_ctx.context(), 8), sizeValue);
+    return m_ctx.builder().CreateBitCast(alloc, ty->getPointerTo(), name.c_str());
 }

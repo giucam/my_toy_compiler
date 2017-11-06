@@ -42,6 +42,8 @@ public:
     CodeGenBlock *parent;
     std::unordered_map<std::string, Value> locals;
     bool returned;
+
+    Optional<Value> local(const std::string &name) const;
 };
 
 struct StructInfo {
@@ -77,10 +79,11 @@ struct FunctionInfo {
 class Allocator
 {
 public:
-    ~Allocator() {}
+    virtual ~Allocator() {}
 
     virtual llvm::Value *allocate(llvm::Type *ty, const std::string &name) = 0;
     virtual llvm::Value *allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name) = 0;
+
 };
 
 class Debug
@@ -167,6 +170,9 @@ public:
     bool addDeclaredType(const std::string &name, llvm::Type *type);
     llvm::Type *declaredType(const std::string &name) const;
 
+    void setAllocationBlock(CodeGenBlock *b) { m_allocationBlock = b; }
+    CodeGenBlock *allocationBlock() const { return m_allocationBlock; }
+
 private:
     llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<FirstClassValue *> &values);
 
@@ -200,15 +206,8 @@ public:
         : m_ctx(ctx)
     {}
 
-    llvm::Value *allocate(llvm::Type *ty, const std::string &name) override
-    {
-        return m_ctx.builder().CreateAlloca(ty, nullptr, name.c_str());
-    }
-    llvm::Value *allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name) override
-    {
-        llvm::Value *alloc = m_ctx.builder().CreateAlloca(llvm::IntegerType::get(m_ctx.context(), 8), sizeValue);
-        return m_ctx.builder().CreateBitCast(alloc, ty->getPointerTo(), name.c_str());
-    }
+    llvm::Value *allocate(llvm::Type *ty, const std::string &name) override;
+    llvm::Value *allocateSized(llvm::Type *ty, llvm::Value *sizeValue, const std::string &name) override;
 
 private:
     CodeGenContext &m_ctx;
