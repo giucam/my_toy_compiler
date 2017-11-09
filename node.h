@@ -468,7 +468,7 @@ private:
 class NWhileStatement : public NStatement
 {
 public:
-    NWhileStatement(std::unique_ptr<NExpression> condition, NBlock *block) : m_condition(std::move(condition)), m_block(block) {}
+    NWhileStatement(const Token &tok, std::unique_ptr<NExpression> condition, NBlock *block) : NStatement(tok), m_condition(std::move(condition)), m_block(block) {}
 
     NExpression *condition() const { return m_condition.get(); }
     NBlock *block() { return m_block; }

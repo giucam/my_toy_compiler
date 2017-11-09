@@ -486,7 +486,7 @@ void Parser::parseIf()
 
 void Parser::parseWhile()
 {
-    nextToken(Token::Type::While);
+    auto tok = nextToken(Token::Type::While);
 
     nextToken(Token::Type::LeftParens);
     auto expr = parseExpression();
@@ -494,7 +494,7 @@ void Parser::parseWhile()
 
     auto block = parseBlock();
 
-    auto stmt = new NWhileStatement(std::move(expr), block);
+    auto stmt = new NWhileStatement(tok, std::move(expr), block);
     m_block->statements.push_back(stmt);
 }
 

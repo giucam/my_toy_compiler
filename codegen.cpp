@@ -831,6 +831,7 @@ Optional<Value> NAssignment::codeGen(CodeGenContext &context)
         err(token(), "cannot store a value of type '{}' to a binding point of type '{}'", rhsValue->type().name(), valueType.name());
     }
 
+    context.debug().setLocation(token());
     context.builder().CreateStore(rhsVal, lhsVal);
     lhsFirstClass->type().setTypeConstraint(rhsFirstClass->type().typeConstraint());
 
@@ -1193,6 +1194,7 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
             auto value = it->type().create(context, &allocator, it->name(), createValue(context, argumentValue, it->type()));
             value.setBindingPoint(ValueBindingPoint(it->type()));
             value.setMutable(it->isMutable());
+            context.debug().createVariable(token(), it->name(), value);
             context.storeLocal(it->name(), value);
         }
 
