@@ -182,6 +182,7 @@ private:
     std::unique_ptr<llvm::Module> m_module;
     llvm::IRBuilder<> m_builder;
     Debug m_debug;
+    CodeGenBlock *m_allocationBlock = nullptr;
     std::unordered_map<std::string, StructInfo> m_structInfo;
     std::unordered_map<llvm::Type *, StructInfo *> m_structInfoByType;
     std::unordered_map<std::string, UnionInfo> m_unionInfo;

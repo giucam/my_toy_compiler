@@ -569,6 +569,9 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
 
     llvm::Function::arg_iterator argsValues = function->arg_begin();
 
+    auto allocBlock = allocationBlock();
+    setAllocationBlock(nullptr);
+
     StackAllocator allocator(*this);
     auto typeIt = argTypes.begin();
     for (auto it = func->arguments.begin(); it != func->arguments.end(); ++it, ++typeIt) {
@@ -605,6 +608,7 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
     }
 
     popBlock();
+    setAllocationBlock(allocBlock);
 
     return function;
 }
@@ -1179,6 +1183,7 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
     context.debug().setLocation(token());
 
     StackAllocator allocator(context);
+    auto allocBlock = context.allocationBlock();
 
     if (block) {
         llvm::BasicBlock *bblock = llvm::BasicBlock::Create(context.context(), "entry", function, 0);
@@ -1205,6 +1210,8 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
 
         context.popBlock();
     }
+
+    context.setAllocationBlock(allocBlock);
     return {};
 }
 
