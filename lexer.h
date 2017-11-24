@@ -60,7 +60,7 @@ public:
         For,
         In,
     };
-    Token() : m_lineno(0), m_columnno(0) {}
+    Token() : m_lineno(-1), m_columnno(0) {}
     Token(Type t, int l, int c, const std::string &filename, const std::string &txt, const std::string &line): m_type(t), m_lineno(l), m_columnno(c), m_filename(filename), m_line(line), m_text(txt) {}
 
     Type type() const { return m_type; }

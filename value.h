@@ -138,6 +138,7 @@ public:
     const Type &type() const { return m_type; }
 
     llvm::Value *load(CodeGenContext &ctx) const;
+    Type refType(CodeGenContext &ctx) const;
 
 private:
     llvm::Value *m_value;
@@ -216,6 +217,26 @@ public:
 private:
     const UnionInfo *m_info;
     CodeGenContext &m_ctx;
+};
+
+class InitializerListValue : public ValueSpecialization
+{
+public:
+    struct Initializer {
+        std::string name;
+        Value value;
+    };
+
+    InitializerListValue(std::vector<Initializer> &inits);
+
+    Type &type();
+    const Type &type() const;
+
+    const std::vector<Initializer> &initializers() const { return m_inits; }
+
+private:
+    std::vector<Initializer> m_inits;
+    Type m_type;
 };
 
 

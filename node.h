@@ -10,6 +10,7 @@
 #include "lexer.h"
 #include "codegen.h"
 #include "types.h"
+#include "checker.h"
 
 class CodeGenContext;
 class Value;
@@ -30,21 +31,41 @@ typedef std::vector<NFunctionDeclaration *> FuncDeclarationList;
 
 class Node {
 public:
-    Node() {}
-    Node(const Token &token) : m_token(token) {}
+    Node() : m_callChecker(std::make_unique<Concrete<Node>>()) { }
+    Node(const Token &token) : Node() { m_token = token; }
     virtual ~Node() {}
     virtual Optional<Value> codeGen(CodeGenContext &context) { return {}; }
+
+    template<class T>
+    void init(T *derived) {
+        m_callChecker = std::make_unique<Concrete<T>>();
+    }
+
+    template<class V>
+    typename V::ReturnType visit(V &visitor, const Type &hint = VoidType()) { return m_callChecker->visit(this, visitor, hint); }
 
     const Token &token() const { return m_token; }
 
 private:
+    struct Interface {
+        virtual Checker::ReturnType visit(Node *n, Checker &c, Checker::HintType h) = 0;
+    };
+    template<class T>
+    struct Concrete : Interface
+    {
+        Checker::ReturnType visit(Node *n, Checker &c, Checker::HintType h) override
+        {
+            return c.visit(*static_cast<T *>(n), h);
+        }
+    };
+    std::unique_ptr<Interface> m_callChecker;
     Token m_token;
 };
 
 class NExpression : public Node
 {
 public:
-    NExpression() : m_context(nullptr) {}
+    NExpression() : Node(), m_context(nullptr) {}
     NExpression(const Token &tok) : Node(tok), m_context(nullptr) {}
     NExpression(const NExpression &) = delete;
     void pushContext(NExpression *context) { m_context = context; }
@@ -65,45 +86,47 @@ private:
 
 class NStatement : public Node {
 public:
-    NStatement() {}
+    NStatement() : Node() {}
     NStatement(const Token &tok) : Node(tok) {}
 };
 
 class NInteger : public NExpression {
 public:
     long long value;
-    NInteger(const Token &tok, long long value) : NExpression(tok), value(value) { }
+    NInteger(const Token &tok, long long value) : NExpression(tok), value(value) { init(this); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
 class NBoolean : public NExpression {
 public:
     bool value;
-    NBoolean(const Token &tok, bool value) : NExpression(tok), value(value) { }
+    NBoolean(const Token &tok, bool value) : NExpression(tok), value(value) { init(this); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
 class NDouble : public NExpression {
 public:
     double value;
-    NDouble(const Token &tok, double value) : NExpression(tok), value(value) { }
+    NDouble(const Token &tok, double value) : NExpression(tok), value(value) {  init(this); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
 class NString : public NExpression {
 public:
     std::string value;
-    NString(const std::string &val) : NExpression(), value(val) {}
+    NString(const Token &tok, const std::string &val) : NExpression(tok), value(val) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
 class NExpressionPack : public NExpression {
 public:
-    NExpressionPack(const Token &tok, ExpressionList &l) : NExpression(tok), m_list(std::move(l)) {}
+    NExpressionPack(const Token &tok, ExpressionList &l) : NExpression(tok), m_list(std::move(l)) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 //     std::vector<NExpression *> unpack(CodeGenContext &context) override;
+
+    const ExpressionList &expressionList() const { return m_list; }
 
 private:
     ExpressionList m_list;
@@ -111,8 +134,8 @@ private:
 
 class NIdentifier : public NExpression {
 public:
-    NIdentifier(const Token &token, const std::string &name) : NExpression(token), name(name), type(Name) { }
-    NIdentifier(const Token &token, int index) : NExpression(token), index(index), type(Index) {}
+    NIdentifier(const Token &token, const std::string &name) : NExpression(token), name(name), type(Name) { init(this); }
+    NIdentifier(const Token &token, int index) : NExpression(token), index(index), type(Index) { init(this); }
 //     NIdentifier(const NIdentifier &i) : NExpression(), parent(i.parent), type(i.type) { if (i.type == Name) { new (&name) std::string(i.name); } else { index = i.index; } }
     ~NIdentifier() {}
 
@@ -136,7 +159,7 @@ public:
     ExpressionList arguments;
 
     NMethodCall(const Token &tok, const std::string &name, ExpressionList &args) :
-                NExpression(tok), name(name) { std::swap(arguments, args); }
+                NExpression(tok), name(name) { init(this); std::swap(arguments, args); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
@@ -161,15 +184,15 @@ public:
     std::unique_ptr<NExpression> lhs;
     std::unique_ptr<NExpression> rhs;
     NBinaryOperator(const Token &tok, std::unique_ptr<NExpression> lhs, OP op, std::unique_ptr<NExpression> rhs) :
-                NExpression(tok), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
+                NExpression(tok), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) { init(this); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 
     void pushConstraints(bool negate) override;
     void popConstraints() override;
 
     struct Constraint {
-        Value lVal;
-        Value rVal;
+        std::function<void (bool)> pushFunc;
+        std::function<void ()> popFunc;
     };
     std::vector<Constraint> m_constraints;
 };
@@ -179,7 +202,7 @@ public:
     std::unique_ptr<NExpression> lhs;
     std::unique_ptr<NExpression> rhs;
     NAssignment(const Token &tok, std::unique_ptr<NExpression> lhs, std::unique_ptr<NExpression> rhs)
-        : NExpression(tok), lhs(std::move(lhs)), rhs(std::move(rhs)) { }
+        : NExpression(tok), lhs(std::move(lhs)), rhs(std::move(rhs)) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
@@ -187,14 +210,14 @@ public:
 class NBlock : public NExpression {
 public:
     StatementList statements;
-    NBlock(): NExpression() { }
+    NBlock(): NExpression() { init(this); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
 class NAddressOfExpression : public NExpression
 {
 public:
-    NAddressOfExpression(const Token &token, std::unique_ptr<NExpression> expr) : NExpression(token), m_expression(std::move(expr)) {}
+    NAddressOfExpression(const Token &token, std::unique_ptr<NExpression> expr) : NExpression(token), m_expression(std::move(expr)) { init(this); }
 
     NExpression *expression() const { return m_expression.get(); }
 
@@ -207,7 +230,7 @@ private:
 class NExpressionStatement : public NStatement {
 public:
     NExpressionStatement(std::unique_ptr<NExpression> expression)
-        : expression(std::move(expression)) { }
+        : expression(std::move(expression)) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
@@ -218,7 +241,7 @@ private:
 class NReturnStatement : public NStatement {
 public:
     NReturnStatement(std::unique_ptr<NExpression> expression)
-        : expression(std::move(expression)) { }
+        : expression(std::move(expression)) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
@@ -258,35 +281,18 @@ public:
     std::unique_ptr<NExpression> expression;
 };
 
-class NVarStructInitializer : public NVariableInitializer
-{
-public:
-    struct Field
-    {
-        std::string name;
-        std::unique_ptr<NExpression> init;
-    };
-    Token token;
-    Type type;
-    std::vector<Field> fields;
-
-    NVarStructInitializer(const Token &tok, const Type &type, std::vector<Field> &f) : token(tok), type(type) { std::swap(fields, f); }
-
-    Value init(CodeGenContext &ctx, const std::string &name) override;
-};
-
 class NVariableDeclaration : public NStatement {
 public:
     NVariableName id;
-    std::unique_ptr<NVariableInitializer> init;
-    NVariableDeclaration(const Token &tok, const NVariableName &name, std::unique_ptr<NVariableInitializer> init) : NStatement(tok), id(name), init(std::move(init)) { }
+    std::unique_ptr<NVariableInitializer> m_init;
+    NVariableDeclaration(const Token &tok, const NVariableName &name, std::unique_ptr<NVariableInitializer> in) : NStatement(tok), id(name), m_init(std::move(in)) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
 
 class NMultiVariableDeclaration : public NStatement {
 public:
-    NMultiVariableDeclaration(const Token &tok, std::vector<NVariableName> &names, std::unique_ptr<NExpression> expr) : NStatement(tok), m_expression(std::move(expr)) { std::swap(m_names, names); }
+    NMultiVariableDeclaration(const Token &tok, std::vector<NVariableName> &names, std::unique_ptr<NExpression> expr) : NStatement(tok), m_expression(std::move(expr)) { init(this); std::swap(m_names, names); }
 
     const std::vector<NVariableName> &names() const { return m_names; }
     NExpression *expression() const { return m_expression.get(); }
@@ -318,7 +324,7 @@ private:
 class NExternDeclaration : public NStatement {
 public:
     NExternDeclaration(const std::string &id, Type type, std::vector<NFunctionArgumentDeclaration> &arguments, bool varargs)
-        : m_type(type), m_name(id), m_varargs(varargs) { std::swap(m_arguments, arguments); }
+        : m_type(type), m_name(id), m_varargs(varargs) { init(this); std::swap(m_arguments, arguments); }
 
     const std::string &name() const { return m_name; }
     Type returnType() const { return m_type; }
@@ -336,7 +342,7 @@ private:
 
 class NExternVariableDeclaration : public NStatement {
 public:
-    NExternVariableDeclaration(const Token &tok, const std::string &name, Type type) : NStatement(tok), m_name(name), m_type(type) {}
+    NExternVariableDeclaration(const Token &tok, const std::string &name, Type type) : NStatement(tok), m_name(name), m_type(type) { init(this); }
 
     const std::string &name() const { return m_name; }
     Type type() const { return m_type; }
@@ -356,7 +362,7 @@ public:
     NBlock *block;
     NFunctionDeclaration(const Token &tok, const std::string &id, const Type &type,
                          const std::vector<NFunctionArgumentDeclaration> &arguments, NBlock *block) :
-                            NStatement(tok), type(type), id(id), arguments(arguments), block(block) { }
+                            NStatement(tok), type(type), id(id), arguments(arguments), block(block) { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 };
@@ -416,7 +422,7 @@ public:
 
 class NIfaceDeclaration: public NStatement {
 public:
-    NIfaceDeclaration(const std::string &name, std::vector<Type> &par, NIfacePrototypeList &pro) : name(name) { std::swap(parameters, par); std::swap(prototypes, pro); }
+    NIfaceDeclaration(const std::string &name, std::vector<Type> &par, NIfacePrototypeList &pro) : name(name) { init(this); std::swap(parameters, par); std::swap(prototypes, pro); }
     Optional<Value> codeGen(CodeGenContext &context) override;
 
     std::string name;
@@ -427,7 +433,7 @@ public:
 
 class NIfacePrototype : public NStatement {
 public:
-    NIfacePrototype(const std::string &name, std::vector<Type> &par) : name(name) { std::swap(parameters, par); }
+    NIfacePrototype(const std::string &name, std::vector<Type> &par) : name(name) { init(this); std::swap(parameters, par); }
 
     std::string name;
     std::vector<Type> parameters;
@@ -437,7 +443,7 @@ public:
 class NImplDeclaration : public NStatement
 {
 public:
-    NImplDeclaration(const std::string &name, std::vector<Type> &par, FuncDeclarationList &funcs) : name(name) { std::swap(parameters, par); std::swap(functions, funcs); }
+    NImplDeclaration(const std::string &name, std::vector<Type> &par, FuncDeclarationList &funcs) : name(name) { init(this); std::swap(parameters, par); std::swap(functions, funcs); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
@@ -451,7 +457,7 @@ public:
 class NIfStatement : public NStatement
 {
 public:
-    NIfStatement(std::unique_ptr<NExpression> condition, NBlock *block, NBlock *elseBlock) : m_condition(std::move(condition)), m_block(block), m_elseBlock(elseBlock) {}
+    NIfStatement(std::unique_ptr<NExpression> condition, NBlock *block, NBlock *elseBlock) : m_condition(std::move(condition)), m_block(block), m_elseBlock(elseBlock) { init(this); }
 
     NExpression *condition() const { return m_condition.get(); }
     NBlock *block() { return m_block; }
@@ -468,7 +474,7 @@ private:
 class NWhileStatement : public NStatement
 {
 public:
-    NWhileStatement(const Token &tok, std::unique_ptr<NExpression> condition, NBlock *block) : NStatement(tok), m_condition(std::move(condition)), m_block(block) {}
+    NWhileStatement(const Token &tok, std::unique_ptr<NExpression> condition, NBlock *block) : NStatement(tok), m_condition(std::move(condition)), m_block(block) { init(this); }
 
     NExpression *condition() const { return m_condition.get(); }
     NBlock *block() { return m_block; }
@@ -489,7 +495,7 @@ public:
     };
 
     NEnumDeclaration(const std::string &name, const Type &type, std::vector<Entry> &entries)
-        : m_name(name), m_type(type) { std::swap(entries, m_entries); }
+        : m_name(name), m_type(type) { init(this); std::swap(entries, m_entries); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
 
@@ -504,9 +510,11 @@ class NCastExpression : public NExpression
 public:
     NCastExpression(const Token &token, std::unique_ptr<NExpression> expr, const Type &type)
         : NExpression(token), m_expression(std::move(expr)), m_type(type)
-    {}
+    { init(this); }
 
     Optional<Value> codeGen(CodeGenContext &context) override;
+
+    Type type() const { return m_type; }
 
 private:
     std::unique_ptr<NExpression> m_expression;
@@ -525,6 +533,26 @@ private:
     Token m_exprToken;
     std::unique_ptr<NExpression> m_arrayExpr;
     NBlock *m_block;
+};
+
+class NInitializerListExpression : public NExpression
+{
+public:
+    struct Initializer
+    {
+        Token token;
+        std::string name;
+        std::unique_ptr<NExpression> value;
+    };
+
+    NInitializerListExpression(const Token &tok, std::vector<Initializer> &initializers);
+
+    Optional<Value> codeGen(CodeGenContext &context) override;
+
+    const std::vector<Initializer> &initializers() const { return m_initializers; }
+
+private:
+    std::vector<Initializer> m_initializers;
 };
 
 #endif

@@ -15,6 +15,8 @@ static void error(Args &&... args)
     exit(1);
 }
 
+#define internalError() { fmt::print(stderr, "\033[1;31mInternal error\033[1;37m in '{}'! {}:{}\n\033[0m", __PRETTY_FUNCTION__, __FILE__, __LINE__); abort(); }
+
 struct Message
 {
     enum class Type {
@@ -30,7 +32,7 @@ struct Message
     bool firstLine;
 
     Message(Type t, const std::string &fname, int l, int c) : type(t), filename(fname), lineno(l), colno(c), firstLine(true) {}
-    ~Message() { if (type == Type::Error) exit(2); }
+    ~Message() { if (type == Type::Error) abort(); }
 
     template<class... Args>
     Message &line(Args &&... args)

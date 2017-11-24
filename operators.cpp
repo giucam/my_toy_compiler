@@ -25,11 +25,7 @@ static Value integerBinOp(const Token &token, llvm::Value *lhsValue, const Type 
 
     switch (op) {
         case NBinaryOperator::OP::Remainder:
-        case NBinaryOperator::OP::Div: {
-            if (!rhsType.typeConstraint().isCompatibleWith(TypeConstraint(TypeConstraint::Operator::NotEqual, 0))) {
-                err(token, "divisor value is of type '{}' and may be 0; guard the operation with an if statement", rhsType.name());
-            }
-        } //fallthrough
+        case NBinaryOperator::OP::Div:
         case NBinaryOperator::OP::Or:
         case NBinaryOperator::OP::Add:
         case NBinaryOperator::OP::Mul:
@@ -158,7 +154,7 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
     auto lhsVal = lhs->codeGen(context);
     auto lhsExprs = lhsVal->getSpecialization<FirstClassValue>();
 
-    fmt::print("binop {} {}\n",lhsVal->type().name(), rhsVal->type().name());
+    fmt::print("binop {} {} - {}\n",lhsVal->type().name(), rhsVal->type().name(), token().lineNo());
 
 //     if (rhsExprs.size() != lhsExprs.size()) {
 //         err(token(), "both operands must have the same cardinality");
@@ -173,11 +169,7 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
 
         llvm::Value *value = nullptr;
         if (lhst->isIntegerTy() && rhst->isIntegerTy()) {
-            auto value = integerBinOp(rhs->token(), lhsValue, lhsExprs->type(), rhsValue, rhsExprs->type(), op, context);
-
-            m_constraints.push_back({ lhsVal, rhsVal });
-            return value;
-
+            return integerBinOp(rhs->token(), lhsValue, lhsExprs->type(), rhsValue, rhsExprs->type(), op, context);
         } else if (lhst->isPointerTy() && sameType) {
             value = pointerBinOp(lhsValue, rhsValue, op, context);
         } else if (lhst->isFloatingPointTy() && sameType) {
@@ -196,25 +188,13 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
 void NBinaryOperator::pushConstraints(bool negate)
 {
     for (auto &&c: m_constraints) {
-        auto &lt = c.lVal.type();
-        auto &rt = c.rVal.type();
-        if ((!negate && op == NBinaryOperator::OP::Equal) ||
-            (negate && op == NBinaryOperator::OP::NotEqual)) {
-            lt.typeConstraint().add(rt.typeConstraint(), this);
-        } else if ((!negate && op == NBinaryOperator::OP::NotEqual) ||
-                   (negate && op == NBinaryOperator::OP::Equal)) {
-            lt.typeConstraint().addNegate(rt.typeConstraint(), this);
-        } else if ((!negate && op == NBinaryOperator::OP::GreaterEqual) ||
-                   (negate && op == NBinaryOperator::OP::Lesser)) {
-            lt.typeConstraint().addGreater(rt.typeConstraint(), this);
-        }
+        c.pushFunc(negate);
     }
 }
 
 void NBinaryOperator::popConstraints()
 {
     for (auto &&c: m_constraints) {
-        auto &lt = c.lVal.type();
-        lt.typeConstraint().removeFromSource(this);
+        c.popFunc();
     }
 }

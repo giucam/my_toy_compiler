@@ -13,6 +13,7 @@ Debug::Debug(CodeGenContext *ctx, const std::string &filename)
      , m_builder(ctx->module())
      , m_file(m_builder.createFile(filename.data(), "."))
      , m_cunit(m_builder.createCompileUnit(llvm::dwarf::DW_LANG_C, m_file, "PinkPig", 0, "", 0))
+     , m_scope(nullptr)
 {
     ctx->module().addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
 }
@@ -50,31 +51,46 @@ void Debug::createVariable(const Token &token, const std::string &name, const Va
 {
     auto file = fileUnit(token.filename());
     auto ty = m_builder.createUnspecifiedType(value.type().name());
-    auto var = m_builder.createAutoVariable(m_scopes.top(), name, file, token.lineNo(), ty);
+    auto var = m_builder.createAutoVariable(m_scope, name, file, token.lineNo(), ty);
 
     if (auto fc = value.getSpecialization<FirstClassValue>()) {
-        m_builder.insertDeclare(fc->value(), var, m_builder.createExpression(), llvm::DebugLoc::get(token.lineNo(), 0, m_scopes.top()), m_ctx->currentBlock()->block);
+        m_builder.insertDeclare(fc->value(), var, m_builder.createExpression(), llvm::DebugLoc::get(token.lineNo(), 0, m_scope), m_ctx->currentBlock()->block);
     }
 }
 
 void Debug::pushScope(llvm::DIScope *scope)
 {
-    m_scopes.push(scope);
+    m_scopes.push_back(scope);
+    m_scope = scope;
 }
 
 void Debug::popScope()
 {
-    m_scopes.pop();
+    m_scopes.pop_back();
+    m_scope = m_scopes.back();
+}
+
+void Debug::setGlobalScope()
+{
+    m_scope = m_scopes.front();
+}
+
+void Debug::restoreScope()
+{
+    m_scope = m_scopes.back();
 }
 
 void Debug::setLocation(const Token &token)
 {
-    m_ctx->builder().SetCurrentDebugLocation(llvm::DebugLoc::get(token.lineNo(), token.columnNo(), m_scopes.top()));
+    if (token.lineNo() >= 0) {
+        m_ctx->builder().SetCurrentDebugLocation(llvm::DebugLoc::get(token.lineNo(), token.columnNo(), m_scope));
+    }
 }
 
 
 CodeGenContext::CodeGenContext(const std::string &name)
-              : m_module(std::make_unique<llvm::Module>(name.c_str(), m_context))
+              : Stage()
+              , m_module(std::make_unique<llvm::Module>(name.c_str(), m_context))
               , m_builder(m_context)
               , m_debug(this, name)
 {
@@ -392,6 +408,18 @@ llvm::Type *CodeGenContext::declaredType(const std::string &name) const
         return nullptr;
     }
     return it->second;
+}
+
+int CodeGenContext::typeSize(const Type &t)
+{
+    auto elmType = t.get(*this);
+    llvm::DataLayout layout(&module());
+    return layout.getTypeSizeInBits(elmType);
+}
+
+bool CodeGenContext::isFunctionDefined(const std::string &name) const
+{
+    return module().getFunction(name.c_str());
 }
 
 
@@ -874,31 +902,7 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
         srcPointer++;
     }
 
-    auto checkConstraints = [&]() {
-        int fromPointer = 0;
-        Type t = from;
-        while (auto p = t.getSpecialization<PointerType>()) {
-            t = p->pointerElementType();
-            ++fromPointer;
-        }
-
-        t = from;
-        while (fromPointer > srcPointer) {
-            t = t.getSpecialization<PointerType>()->pointerElementType();
-            --fromPointer;
-        }
-        while (fromPointer < srcPointer) {
-            t = t.getPointerTo();
-            ++fromPointer;
-        }
-
-        return canStoreInto(*this, to, t);
-    };
-
     if (baseDest == value->getType()) {
-        if (!checkConstraints()) {
-            return nullptr;
-        }
         return value;
     }
 
@@ -919,12 +923,10 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
             constraint.addConstraint(TypeConstraint::Operator::GreaterEqual, min);
             if (from.typeConstraint().isCompatibleWith(constraint)) {
                 return builder().CreateTrunc(value, to.get(*this));
-            } else {
-                err({}, "cannot truncate from type '{}' to type '{}': value must be between {} and {}",  from.name(), to.name(), min, max);
             }
         }
 
-        return nullptr;
+        internalError();
     }
 
     while (srcPointer > destPointer) {
@@ -932,7 +934,7 @@ llvm::Value *CodeGenContext::convertTo(llvm::Value *value, const Type &from, con
         --srcPointer;
     }
 
-    if (destPointer == srcPointer && checkConstraints()) {
+    if (destPointer == srcPointer) {
         return value;
     }
 
@@ -1029,55 +1031,16 @@ Value NVarExpressionInitializer::init(CodeGenContext &ctx, const std::string &na
     return value;
 }
 
-Value NVarStructInitializer::init(CodeGenContext &ctx, const std::string &name)
-{
-    auto t = type.get(ctx);
-    size_t numFields = 0;
-    if (auto info = ctx.structInfo(t)) {
-        numFields = info->fields.size();
-    } else if (auto i = ctx.unionInfo(t)) {
-        numFields = i->fields.size();
-    }
-
-    StackAllocator allocator(ctx);
-    auto value = type.create(ctx, &allocator, name);
-
-    if (fields.empty()) {
-        return value;
-    }
-
-    if (fields.size() != numFields) {
-        err(token, "wrong number of initializers passed when declaring variable of type '{}'", name, type.name());
-    }
-
-    auto structValue = value.getSpecialization<NamedAggregateValue>();
-    for (auto &&f: fields) {
-        auto dest = structValue->extract(f.name);
-        auto destfirstclass = dest.getSpecialization<FirstClassValue>();
-        auto src = f.init->codeGen(ctx);
-        auto firstclass = src->getSpecialization<FirstClassValue>();
-        auto srcValue = firstclass->value();
-
-        srcValue = ctx.convertTo(srcValue, firstclass->type(), destfirstclass->type());
-        if (!srcValue) {
-            err(token, "cannot store a value of type '{}' into a value of type '{}'", firstclass->type().name(), destfirstclass->type().name());
-        }
-
-        ctx.builder().CreateStore(srcValue, destfirstclass->value());
-    }
-
-    return value;
-}
-
 Optional<Value> NVariableDeclaration::codeGen(CodeGenContext &context)
 {
     std::cout << "Creating variable declaration " << id.name() << " "<< id.isMutable()<< '\n';
 
-    auto value = init->init(context, id.name());
+    context.debug().setLocation(token());
+    auto value = m_init->init(context, id.name());
     value.setMutable(id.isMutable());
-    context.storeLocal(id.name(), value);
-
     context.debug().createVariable(token(), id.name(), value);
+
+    context.storeLocal(id.name(), value);
 
     return value;
 }
@@ -1210,6 +1173,7 @@ Optional<Value> NFunctionDeclaration::codeGen(CodeGenContext &context)
         context.popBlock();
     }
 
+    context.debug().popScope();
     context.setAllocationBlock(allocBlock);
     return {};
 }
@@ -1220,6 +1184,7 @@ NStructDeclaration::NStructDeclaration(const std::string &id, Flags f)
                   , m_hasBody(false)
                   , m_flags(f)
 {
+    init(this);
 }
 
 Optional<Value> NStructDeclaration::codeGen(CodeGenContext &context)
@@ -1271,6 +1236,7 @@ NUnionDeclaration::NUnionDeclaration(const std::string &id, std::vector<Field> &
                  : id(id)
                  , m_type(StructType(id))
 {
+    init(this);
     std::swap(e, elements);
 }
 
@@ -1524,8 +1490,12 @@ Optional<Value> NCastExpression::codeGen(CodeGenContext &ctx)
 
         if (type->isIntegerTy()) {
             if (castType->isIntegerTy()) {
-                fmt::print("int \n");
-                return createValue(ctx, ctx.builder().CreateTrunc(firstclass->load(ctx), m_type.get(ctx)), m_type);
+                if (static_cast<llvm::IntegerType *>(type)->getBitWidth() == 1) {
+                    return createValue(ctx, ctx.builder().CreateZExt(firstclass->load(ctx), m_type.get(ctx)), m_type);
+                } else {
+                    fmt::print("int \n");
+                    return createValue(ctx, ctx.builder().CreateTrunc(firstclass->load(ctx), m_type.get(ctx)), m_type);
+                }
             } else if (castType->isFloatingPointTy()) {
                 auto val = ctx.builder().CreateSIToFP(firstclass->load(ctx), m_type.get(ctx));
                 return createValue(ctx, val, m_type);
@@ -1549,6 +1519,7 @@ NForStatement::NForStatement(const Token &itTok, const Token &exprTok, std::uniq
              , m_arrayExpr(std::move(arrExpr))
              , m_block(block)
 {
+    init(this);
 }
 
 Optional<Value> NForStatement::codeGen(CodeGenContext &ctx)
@@ -1615,6 +1586,36 @@ Optional<Value> NForStatement::codeGen(CodeGenContext &ctx)
     ctx.builder().SetInsertPoint(afterblock);
 
     return {};
+}
+
+void CodeGenContext::inject(Node *node, InjectScope scope)
+{
+    if (scope == InjectScope::Global) {
+        debug().setGlobalScope();
+
+    }
+    node->codeGen(*this);
+    if (scope == InjectScope::Global) {
+        debug().restoreScope();
+    }
+}
+
+
+
+NInitializerListExpression::NInitializerListExpression(const Token &tok, std::vector<Initializer> &inits)
+                          : NExpression(tok)
+{
+    init(this);
+    std::swap(m_initializers, inits);
+}
+
+Optional<Value> NInitializerListExpression::codeGen(CodeGenContext &ctx)
+{
+    std::vector<InitializerListValue::Initializer> inits;
+    for (auto &&i: m_initializers) {
+        inits.push_back({ i.name, i.value->codeGen(ctx) });
+    }
+    return Value(InitializerListValue(inits));
 }
 
 

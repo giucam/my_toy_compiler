@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 #include "lexer.h"
 
@@ -13,6 +14,7 @@ namespace llvm {
     class StructType;
 }
 
+class Stage;
 class Value;
 class Allocator;
 class StructInfo;
@@ -38,6 +40,7 @@ public:
     void addConstraint(Operator op, int v);
     void add(const TypeConstraint &c, const void *source);
     void addNegate(const TypeConstraint &c, const void *source);
+    void addGreaterEqual(const TypeConstraint &c, const void *source);
     void addGreater(const TypeConstraint &c, const void *source);
     void removeFromSource(void *source);
 
@@ -61,6 +64,7 @@ public:
     template<class T>
     Type(T handler);
 
+    void initialize(Stage &stage);
     llvm::Type *get(CodeGenContext &ctx) const;
     std::string name() const;
     std::string typeName() const;
@@ -105,10 +109,13 @@ public:
     IntegerType(bool sign, int bits) : m_signed(sign), m_bits(bits) {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     long long maxValue() const;
     long long minValue() const;
+
+    int bits() const { return m_bits; }
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
 
@@ -124,7 +131,10 @@ public:
     FloatingType(int bits) : m_bits(bits) {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
+
+    int bits() const { return m_bits; }
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
 
@@ -139,6 +149,7 @@ public:
     VoidType() {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -151,6 +162,7 @@ public:
     PointerType(const Type t) : m_type(t) {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -168,6 +180,7 @@ public:
     FunctionPointerType(Type ret, std::vector<Type> &args) : m_ret(ret) { std::swap(args, m_args); }
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -184,6 +197,7 @@ public:
     ArrayType(Type t, int n) : m_type(t), m_num(n) {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -200,6 +214,7 @@ public:
     ArgumentPackType() {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -214,6 +229,7 @@ public:
     const std::vector<Type> &unpack() const { return m_types; }
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -230,6 +246,7 @@ public:
     StructType(llvm::StructType *type);
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -246,6 +263,7 @@ public:
     DynamicArrayType(const Type &elmType);
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage);
     std::string name() const;
 
     Type elementType() const { return m_elmType; }
@@ -257,6 +275,8 @@ public:
 
 private:
     Type m_elmType;
+    mutable llvm::Type *m_type = nullptr;
+    mutable bool m_initializing = false;
 };
 
 class CustomType
@@ -266,6 +286,7 @@ public:
     CustomType(const Token &tok, const std::string &name) : m_token(tok), m_name(name) {}
 
     llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
@@ -283,6 +304,7 @@ Type llvmType(CodeGenContext &ctx, llvm::Type *t);
 struct Type::IfaceBase {
     virtual ~IfaceBase() {}
     virtual llvm::Type *get(CodeGenContext &ctx) const = 0;
+    virtual void initialize(Stage &stage) = 0;
     virtual std::string name() const = 0;
     virtual Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const = 0;
     void (*magic)();
@@ -291,6 +313,7 @@ template<class T>
 struct Type::Iface : Type::IfaceBase {
     Iface(T d) : data(std::move(d)) { magic = T::magic; }
     llvm::Type *get(CodeGenContext &ctx) const override { return data.get(ctx); }
+    void initialize(Stage &stage) override { return data.initialize(stage); }
     std::string name() const override { return data.name(); }
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const override
     {
@@ -304,6 +327,7 @@ inline Type::Type(T handler)
     : m_iface(std::make_shared<Iface<T>>(std::move(handler))) {}
 
 inline llvm::Type *Type::get(CodeGenContext &ctx) const { return m_iface->get(ctx); }
+inline void Type::initialize(Stage &stage) { return const_cast<IfaceBase *>(m_iface.get())->initialize(stage); }
 
 template<class T>
 inline const T *Type::getSpecialization() const

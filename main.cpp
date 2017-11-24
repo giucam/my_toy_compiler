@@ -138,6 +138,9 @@ int main(int argc, char **argv)
 
         parser.parse(&programBlock, false);
 
+        Checker checker;
+        programBlock.visit(checker);
+
         CodeGenContext context(file);
         context.module().setTargetTriple(target.triple);
         context.module().setDataLayout(target.dataLayout);

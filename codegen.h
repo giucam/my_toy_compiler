@@ -24,6 +24,7 @@
 
 #include "value.h"
 #include "common.h"
+#include "stage.h"
 
 class NBlock;
 class NIdentifier;
@@ -99,6 +100,9 @@ public:
     void pushScope(llvm::DIScope *scope);
     void popScope();
 
+    void setGlobalScope();
+    void restoreScope();
+
     void setLocation(const Token &token);
 
     void finalize();
@@ -109,10 +113,12 @@ private:
     llvm::DIFile *m_file;
     llvm::DICompileUnit *m_cunit;
     std::unordered_map<std::string, llvm::DIFile *> m_fileUnits;
-    std::stack<llvm::DIScope *> m_scopes;
+    std::vector<llvm::DIScope *> m_scopes;
+    llvm::DIScope *m_scope;
 };
 
-class CodeGenContext {
+class CodeGenContext : public Stage
+{
 public:
     CodeGenContext(const std::string &name);
 
@@ -172,6 +178,10 @@ public:
 
     void setAllocationBlock(CodeGenBlock *b) { m_allocationBlock = b; }
     CodeGenBlock *allocationBlock() const { return m_allocationBlock; }
+
+    void inject(Node *node, InjectScope scope);
+    int typeSize(const Type &t) override;
+    bool isFunctionDefined(const std::string &name) const override;
 
 private:
     llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<FirstClassValue *> &values);

@@ -5,6 +5,7 @@
 #include "types.h"
 #include "codegen.h"
 #include "common.h"
+#include "node.h"
 
 Type Type::getPointerTo() const
 {
@@ -13,6 +14,9 @@ Type Type::getPointerTo() const
 
 std::string Type::name() const
 {
+    if (!m_iface) {
+        return "-";
+    }
     return m_iface->name() + m_constraint.name();
 }
 
@@ -160,12 +164,25 @@ void TypeConstraint::addNegate(const TypeConstraint &constraint, const void *sou
     }
 }
 
-void TypeConstraint::addGreater(const TypeConstraint &constraint, const void *source)
+void TypeConstraint::addGreaterEqual(const TypeConstraint &constraint, const void *source)
 {
     for (auto &&c: constraint.m_constraints) {
         switch (c.op) {
             case Operator::Equal:
                 m_constraints.push_back({ Operator::GreaterEqual, c.value, source });
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void TypeConstraint::addGreater(const TypeConstraint &constraint, const void *source)
+{
+    for (auto &&c: constraint.m_constraints) {
+        switch (c.op) {
+            case Operator::Equal:
+                m_constraints.push_back({ Operator::Greater, c.value, source });
                 break;
             default:
                 break;
@@ -324,14 +341,14 @@ long long IntegerType::maxValue() const
 long long IntegerType::minValue() const
 {
     if (m_signed) {
-        return - (1ll << m_bits);
+        return - (1ll << (m_bits - 1));
     }
     return 0;
 }
 
 static bool canStoreInto(CodeGenContext &ctx, const Type &lhs, const Type &rhs)
 {
-    if (lhs.get(ctx) != rhs.get(ctx) || !rhs.typeConstraint().isCompatibleWith(lhs.typeConstraint())) {
+    if (lhs.get(ctx) != rhs.get(ctx) /*|| !rhs.typeConstraint().isCompatibleWith(lhs.typeConstraint())*/) {
         return false;
     }
     if (auto lp = lhs.getSpecialization<PointerType>()) {
@@ -346,17 +363,17 @@ static Value createFirstClassValue(CodeGenContext &ctx, Allocator *alloc, const 
     auto t = type.get(ctx);
     auto val = alloc->allocate(t, name);
     if (storeValue.isValid()) {
-        auto fc = storeValue.getSpecialization<FirstClassValue>();
-
-        auto storeTy = fc->type();
-        while (storeTy.get(ctx) != fc->value()->getType()) {
-            storeTy = storeTy.getPointerTo();
+        if (auto fc = storeValue.getSpecialization<FirstClassValue>()) {
+            auto storeTy = fc->type();
+            while (storeTy.get(ctx) != fc->value()->getType()) {
+                storeTy = storeTy.getPointerTo();
+            }
+            auto store = ctx.convertTo(fc->value(), storeTy, type);
+            if (!store || !canStoreInto(ctx, type, fc->type())) {
+                throw CreateError { CreateError::Err::StoreError };
+            }
+            ctx.builder().CreateStore(store, val);
         }
-        auto store = ctx.convertTo(fc->value(), storeTy, type);
-        if (!store || !canStoreInto(ctx, type, fc->type())) {
-            throw CreateError { CreateError::Err::StoreError };
-        }
-        ctx.builder().CreateStore(store, val);
     }
 
     return createValue(ctx, val, type);
@@ -492,6 +509,7 @@ public:
     LlvmType(llvm::Type *t) : m_type(t) {}
 
     llvm::Type *get(CodeGenContext &ctx) const { return m_type; }
+    void initialize(Stage &stage) {}
     std::string name() const;
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
@@ -590,22 +608,42 @@ Value StructType::create(CodeGenContext &ctx, Allocator *alloc, const std::strin
         val = alloc->allocate(m_type, name);
     }
 
-    if (storeValue.isValid()) {
-        auto fc = storeValue.getSpecialization<FirstClassValue>();
+    auto value = structValue(type, val, info, ctx);
 
-        auto storeTy = fc->type();
-        while (storeTy.get(ctx) != fc->value()->getType()) {
-            storeTy = storeTy.getPointerTo();
+    std::function<void (llvm::Value *, const Value &, const Value &)> initialize = [&](llvm::Value *dest, const Value &destValue, const Value &src)
+    {
+        if (auto fc = src.getSpecialization<FirstClassValue>()) {
+            auto storeTy = fc->refType(ctx);
+            auto store = ctx.convertTo(fc->value(), storeTy, destValue.type());
+
+            if (!store) {
+                throw CreateError { CreateError::Err::StoreError };
+            }
+            ctx.builder().CreateStore(store, dest);
+        } else if (auto il = src.getSpecialization<InitializerListValue>()) {
+            auto structVal = destValue.getSpecialization<NamedAggregateValue>();
+            if (il->initializers().size() == 0) {
+                ctx.builder().CreateStore(llvm::ConstantAggregateZero::get(dest->getType()->getPointerElementType()), dest);
+                return;
+            }
+            for (auto &&f: il->initializers()) {
+                auto dest = structVal->extract(f.name);
+                auto destfirstclass = dest.getSpecialization<FirstClassValue>();
+
+                initialize(destfirstclass->value(), dest, f.value);
+            }
         }
-        auto store = ctx.convertTo(fc->value(), storeTy, type);
-        if (!store || !canStoreInto(ctx, type, fc->type())) {
-            throw CreateError { CreateError::Err::StoreError };
-        }
-        ctx.builder().CreateStore(store, val);
+    };
+
+    if (storeValue.isValid()) {
+        initialize(val, value, storeValue);
     }
 
-    return structValue(type, val, info, ctx);
+    return value;
 }
+
+
+
 
 llvm::Type *CustomType::get(CodeGenContext &ctx) const
 {
@@ -672,110 +710,111 @@ std::string DynamicArrayType::name() const
 
 llvm::Type *DynamicArrayType::get(CodeGenContext &ctx) const
 {
+    if (m_type) {
+        return m_type;
+    }
+
     auto elmType = m_elmType.get(ctx);
     llvm::Type *types[] = { elmType->getPointerTo(), //data pointer
                             ctx.builder().getInt32Ty(), //used
                             ctx.builder().getInt32Ty() //allocated
-                          };
-    auto type = llvm::StructType::get(ctx.context(), llvm::makeArrayRef(types, 3));
+                        };
+    m_type = llvm::StructType::get(ctx.context(), llvm::makeArrayRef(types, 3));
 
-    auto appendName = std::string("append_") + name() + "_" + m_elmType.name();
-    if (!ctx.module().getFunction(appendName.c_str())) {
-        llvm::DataLayout layout(&ctx.module());
-        int elmSize = layout.getTypeSizeInBits(elmType) / 8;
+    const_cast<DynamicArrayType *>(this)->initialize(ctx);
 
-        auto callBaseLibFunc = [&](const char *name, const std::vector<llvm::Value *> &args, llvm::Type *retType) -> llvm::Value * {
-            auto func = ctx.module().getFunction(name);
-            if (!func) {
-                std::vector<llvm::Type *> types;
-                for (auto &&a: args) {
-                    types.push_back(a->getType());
-                }
-                llvm::FunctionType *ftype = llvm::FunctionType::get(retType, llvm::makeArrayRef(types), false);
-                func = llvm::Function::Create(ftype, llvm::GlobalValue::ExternalLinkage, name, &ctx.module());
-            }
-            return ctx.builder().CreateCall(func, llvm::makeArrayRef(args));
-        };
-
-        auto builtinFunction = [&](const std::string &name, const std::vector<Type> types, const Type &retType, const std::function<void (const std::vector<Value> &values)> &block)
-        {
-            std::vector<llvm::Type *> argTypes;
-            for (auto &&t: types) {
-                argTypes.push_back(t.get(ctx));
-            }
-
-            llvm::FunctionType *ftype = llvm::FunctionType::get(retType.get(ctx), llvm::makeArrayRef(argTypes), false);
-            llvm::Function *function = llvm::Function::Create(ftype, llvm::GlobalValue::InternalLinkage, name.c_str(), &ctx.module());
-
-            auto info = ctx.addFunctionInfo(function);
-            info->argTypes = types;
-            info->returnType = retType;
-
-            StackAllocator allocator(ctx);
-            llvm::BasicBlock *bblock = llvm::BasicBlock::Create(ctx.context(), "entry", function, 0);
-            ctx.pushBlock(bblock, function, nullptr);
-
-            llvm::Function::arg_iterator argsValues = function->arg_begin();
-            std::vector<Value> values;
-            for (auto &&t: types) {
-                values.push_back(t.create(ctx, &allocator, "", createValue(ctx, &*argsValues++, t)));
-            }
-
-            block(values);
-
-            ctx.popBlock();
-        };
-
-        // we use llvmType here instead of *this, because otherwise when calling get() on Type(*this) inside builtinFunction we
-        // would reenter this function, and since the append function is not created yet we would start an infinite loop
-        builtinFunction(appendName, { llvmType(ctx, type).getPointerTo(), m_elmType }, VoidType(), [&](const std::vector<Value> &values) {
-            std::vector<llvm::Value *> vals;
-            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
-            vals.push_back(values[1].getSpecialization<FirstClassValue>()->value());
-            vals.push_back(ctx.builder().getInt32(elmSize));
-
-            callBaseLibFunc("__base_lib__vector_append", vals, ctx.builder().getVoidTy());
-            ctx.builder().CreateRetVoid();
-        });
-
-        auto clearName = std::string("clear_") + name();
-        builtinFunction(clearName, { Type(*this).getPointerTo() }, VoidType(), [&](const std::vector<Value> &values) {
-            std::vector<llvm::Value *> vals;
-            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
-
-            callBaseLibFunc("__base_lib__vector_clear", vals, ctx.builder().getVoidTy());
-            ctx.builder().CreateRetVoid();
-        });
-
-        auto opName = std::string("operator[]_") + name() + "_i32";
-        builtinFunction(opName, { Type(*this).getPointerTo(), IntegerType(true, 32) }, m_elmType.getPointerTo(), [&](const std::vector<Value> &values) {
-            std::vector<llvm::Value *> vals;
-            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
-            vals.push_back(ctx.builder().getInt32(elmSize));
-            vals.push_back(values[1].getSpecialization<FirstClassValue>()->load(ctx));
-
-            llvm::Value *ret = callBaseLibFunc("__base_lib__vector_element", vals, ctx.builder().getInt8PtrTy());
-            ret = ctx.builder().CreateBitCast(ret, elmType->getPointerTo());
-            ctx.builder().CreateRet(ret);
-        });
-
-        auto countName = std::string("count_") + name();
-        builtinFunction(countName, { Type(*this).getPointerTo() }, IntegerType(true, 32), [&](const std::vector<Value> &values) {
-            std::vector<llvm::Value *> vals;
-            vals.push_back(values[0].getSpecialization<FirstClassValue>()->load(ctx));
-
-            llvm::Value *ret = callBaseLibFunc("__base_lib__vector_count", vals, ctx.builder().getInt32Ty());
-            ctx.builder().CreateRet(ret);
-        });
-    }
-
-    return type;
+    return m_type;
 }
 
-Value DynamicArrayType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
+void DynamicArrayType::initialize(Stage &stage)
+{
+    if (m_initializing) {
+        return;
+    }
+    m_initializing = true;
+
+    auto appendName = std::string("append_") + name() + "_" + m_elmType.name();
+    if (!stage.isFunctionDefined(appendName)) {
+        int elmSize = stage.typeSize(m_elmType) / 8;
+        auto vecType = Type(*this).getPointerTo();
+
+        {
+        std::vector<NFunctionArgumentDeclaration> baseLibAppendArgs = { { Token(), "vector", vecType, true },
+                                                                        { Token(), "element", m_elmType.getPointerTo(), true },
+                                                                        { Token(), "elmSize", IntegerType(true, 32), true } };
+        NExternDeclaration baseLibAppendFunc("__base_lib__vector_append", VoidType(), baseLibAppendArgs, false);
+        stage.inject(&baseLibAppendFunc, Stage::InjectScope::Global);
+
+        std::vector<NFunctionArgumentDeclaration> appendArgs = { { Token(), "vector", vecType, true },
+                                                                    { Token(), "element", m_elmType, true } };
+        NBlock appendBlock;
+        ExpressionList appendExprs;
+        appendExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
+        appendExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "element")));
+        appendExprs.push_back(std::move(std::make_unique<NInteger>(Token(), elmSize)));
+        appendBlock.statements.push_back(new NExpressionStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_append", appendExprs)));
+        NFunctionDeclaration appendFunc(Token(), appendName, VoidType(), appendArgs, &appendBlock);
+        stage.inject(&appendFunc, Stage::InjectScope::Global);
+        }
+
+        {
+        std::vector<NFunctionArgumentDeclaration> baseLibClearArgs = { { Token(), "vector", vecType, true } };
+        NExternDeclaration baseLibClearFunc("__base_lib__vector_clear", VoidType(), baseLibClearArgs, false);
+        stage.inject(&baseLibClearFunc, Stage::InjectScope::Global);
+
+        auto clearName = std::string("clear_") + name();
+        std::vector<NFunctionArgumentDeclaration> clearArgs = { { Token(), "vector", vecType, true } };
+        NBlock clearBlock;
+        ExpressionList clearExprs;
+        clearExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
+        clearBlock.statements.push_back(new NExpressionStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_clear", clearExprs)));
+        NFunctionDeclaration clearFunc(Token(), clearName, VoidType(), clearArgs, &clearBlock);
+        stage.inject(&clearFunc, Stage::InjectScope::Global);
+        }
+
+        {
+        std::vector<NFunctionArgumentDeclaration> baseLibOpArgs = { { Token(), "vector", vecType, true },
+                                                                    { Token(), "elmSize", IntegerType(true, 32), true },
+                                                                    { Token(), "index", IntegerType(true, 32), true } };
+        NExternDeclaration baseLibOpFunc("__base_lib__vector_element", m_elmType.getPointerTo(), baseLibOpArgs, false);
+        stage.inject(&baseLibOpFunc, Stage::InjectScope::Global);
+
+        auto opName = std::string("operator[]_") + name() + "_i32";
+        std::vector<NFunctionArgumentDeclaration> opArgs = { { Token(), "vector", vecType, true },
+                                                                { Token(), "index", IntegerType(true, 32), true } };
+        NBlock opBlock;
+        ExpressionList opExprs;
+        opExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
+        opExprs.push_back(std::move(std::make_unique<NInteger>(Token(), elmSize)));
+        opExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "index")));
+        opBlock.statements.push_back(new NReturnStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_element", opExprs)));
+        NFunctionDeclaration opFunc(Token(), opName, m_elmType.getPointerTo(), opArgs, &opBlock);
+        stage.inject(&opFunc, Stage::InjectScope::Global);
+        }
+
+        {
+        std::vector<NFunctionArgumentDeclaration> baseLibCountArgs = { { Token(), "vector", vecType, true } };
+        NExternDeclaration baseLibCountFunc("__base_lib__vector_count", IntegerType(true, 32), baseLibCountArgs, false);
+        stage.inject(&baseLibCountFunc, Stage::InjectScope::Global);
+
+        auto countName = std::string("count_") + name();
+        std::vector<NFunctionArgumentDeclaration> countArgs = { { Token(), "vector", vecType, true } };
+        NBlock countBlock;
+        ExpressionList countExprs;
+        countExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
+        countBlock.statements.push_back(new NReturnStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_count", countExprs)));
+        NFunctionDeclaration countFunc(Token(), countName, IntegerType(true, 32), countArgs, &countBlock);
+        stage.inject(&countFunc, Stage::InjectScope::Global);
+        }
+    }
+
+    m_initializing = false;
+}
+
+Value DynamicArrayType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &varName, const Type &type, const Value &storeValue) const
 {
     auto t = static_cast<llvm::StructType *>(get(ctx));
-    auto val = alloc->allocate(t, name);
+    auto val = alloc->allocate(t, varName);
 
     auto init = llvm::ConstantAggregateZero::get(t);
     ctx.builder().CreateStore(init, val);

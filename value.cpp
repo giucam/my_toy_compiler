@@ -55,12 +55,16 @@ Value createValue(CodeGenContext &ctx, llvm::Value *value, const Type &valueType
 
 llvm::Value *FirstClassValue::load(CodeGenContext &ctx) const
 {
+    return ctx.convertTo(m_value, refType(ctx), m_type);
+}
+
+Type FirstClassValue::refType(CodeGenContext &ctx) const
+{
     auto t = m_type;
     while (t.get(ctx) != m_value->getType()) {
         t = t.getPointerTo();
     }
-
-    return ctx.convertTo(m_value, t, m_type);
+    return t;
 }
 
 
@@ -232,6 +236,23 @@ Value TupleValueH::extract(int id) const
 
 
 
+InitializerListValue::InitializerListValue(std::vector<Initializer> &inits)
+{
+    std::swap(inits, m_inits);
+}
+
+Type &InitializerListValue::type()
+{
+    return m_type;
+}
+
+const Type &InitializerListValue::type() const
+{
+    return m_type;
+}
+
+
+
 Value simpleValue(llvm::Value *val, const Type &type)
 {
     return FirstClassValue(val, type);
@@ -260,8 +281,8 @@ Value tupleValue(const Type &t, llvm::Value *alloc, const TupleInfo *i, CodeGenC
 void Value::setMutable(bool m)
 {
     if (m) {
-        m_flags = m_flags | m;
+        m_flags = m_flags | (int)Flags::Mutable;
     } else {
-        m_flags = m_flags & ~m;
+        m_flags = m_flags & ~(int)Flags::Mutable;
     }
 }

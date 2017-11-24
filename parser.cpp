@@ -138,7 +138,7 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
         return std::make_unique<NInteger>(tok, std::stol(tok.text()));
     } else if (tok.type() == Token::Type::StringLiteral) {
         nextToken();
-        return std::make_unique<NString>(tok.text());
+        return std::make_unique<NString>(tok, tok.text());
     } else if (tok.type() == Token::Type::LeftParens) {
         ExpressionList list = parseExpressionList();
 
@@ -161,6 +161,27 @@ std::unique_ptr<NExpression> Parser::parsePrimary(NExpression *context)
     } else if (tok.type() == Token::Type::False) {
         nextToken();
         return std::make_unique<NBoolean>(tok, false);
+    } else if (tok.type() == Token::Type::LeftBrace) {
+        auto exprTok = nextToken();
+
+        std::vector<NInitializerListExpression::Initializer> list;
+
+        auto tok = nextToken();
+        while (tok.type() != Token::Type::RightBrace) {
+            checkTokenType(tok, Token::Type::Identifier);
+            checkTokenType(nextToken(), Token::Type::Equal);
+            auto expr = parseExpression();
+
+            list.push_back({tok, tok.text(), std::move(expr)});
+
+            tok = nextToken();
+            if (tok.type() == Token::Type::Comma) {
+                tok = nextToken();
+            } else if (tok.type() != Token::Type::RightBrace) {
+                err(tok, "',' or '{}' expected", '}');
+            }
+        }
+        return std::make_unique<NInitializerListExpression>(exprTok, list);
     }
 
     if (expression) {
@@ -312,31 +333,8 @@ void Parser::parseLet()
         auto type = parseType();
         checkTokenType(nextToken(), Token::Type::Equal);
 
-        if (m_lexer.peekToken().type() == Token::Type::LeftBrace) {
-            std::vector<NVarStructInitializer::Field> list;
-
-            nextToken(); // brace
-            auto tok = nextToken();
-            while (tok.type() != Token::Type::RightBrace) {
-                checkTokenType(tok, Token::Type::Identifier);
-                checkTokenType(nextToken(), Token::Type::Equal);
-                auto expr = parseExpression();
-
-                list.push_back({tok.text(), std::move(expr)});
-
-                tok = nextToken();
-                if (tok.type() == Token::Type::Comma) {
-                    tok = nextToken();
-                } else if (tok.type() != Token::Type::RightBrace) {
-                    err(tok, "',' or '{}' expected", '}');
-                }
-            }
-
-            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarStructInitializer>(tok, type, list));
-        } else {
-            auto expr = parseExpression();
-            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, type, std::move(expr)));
-        }
+        auto expr = parseExpression();
+        var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, type, std::move(expr)));
     } else {
         err(tok, "':' or '=' expected");
     }
