@@ -28,7 +28,7 @@ set(SOURCES
 llvm_map_components_to_libnames(llvm_libs mcjit native)
 
 add_executable(parser ${SOURCES})
-target_link_libraries(parser ${LLVM_LDFLAGS} LLVM clang)
+target_link_libraries(parser LLVM libclang.so)
 
 add_custom_target(build ./parser -o example example.txt print.lang  DEPENDS parser)
 add_custom_target(run echo "Running..." COMMAND ./example DEPENDS build)

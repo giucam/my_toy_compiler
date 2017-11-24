@@ -16,7 +16,6 @@
 #include <llvm/IR/IRPrintingPasses.h>
 #include <llvm/IR/IRBuilder.h>
 #include "llvm/IR/DIBuilder.h"
-#include <llvm/Bitcode/ReaderWriter.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/MCJIT.h>
@@ -107,6 +106,7 @@ public:
 private:
     CodeGenContext *m_ctx;
     llvm::DIBuilder m_builder;
+    llvm::DIFile *m_file;
     llvm::DICompileUnit *m_cunit;
     std::unordered_map<std::string, llvm::DIFile *> m_fileUnits;
     std::stack<llvm::DIScope *> m_scopes;

@@ -11,7 +11,8 @@
 Debug::Debug(CodeGenContext *ctx, const std::string &filename)
      : m_ctx(ctx)
      , m_builder(ctx->module())
-     , m_cunit(m_builder.createCompileUnit(llvm::dwarf::DW_LANG_C, filename, ".", "PinkPig", 0, "", 0))
+     , m_file(m_builder.createFile(filename.data(), "."))
+     , m_cunit(m_builder.createCompileUnit(llvm::dwarf::DW_LANG_C, m_file, "PinkPig", 0, "", 0))
 {
     ctx->module().addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
 }
@@ -42,7 +43,7 @@ llvm::DISubprogram *Debug::createFunction(const Token &token, const std::string 
 
     auto unit = fileUnit(token.filename());
     auto functionTy = m_builder.createSubroutineType(m_builder.getOrCreateTypeArray(types));
-    return m_builder.createFunction(unit, funcName, llvm::StringRef(), unit, token.lineNo(), functionTy, false, true, token.lineNo(), 0, false);
+    return m_builder.createFunction(unit, funcName, llvm::StringRef(), unit, token.lineNo(), functionTy, false, true, token.lineNo(), (llvm::DINode::DIFlags)0, false);
 }
 
 void Debug::createVariable(const Token &token, const std::string &name, const Value &value)
@@ -529,7 +530,6 @@ llvm::Function *CodeGenContext::makeConcreteFunction(NFunctionDeclaration *func,
     auto templateId = std::string(func->id);
 
     auto addType = [&](llvm::Type *t) {
-        t->dump();
         argTypes.push_back(t);
         templateId += typeName(t);
     };
@@ -643,7 +643,6 @@ static llvm::Function *findInterfaceImpl(const Token &tok, const std::string &na
         }
 
         auto par = proto->parameters[i];
-        std::cout<<"    ";t->dump(); std::cout<<" -> "<<par.name()<<"\n";
         for (size_t i = 0; i < iface->parameters.size(); ++i) {
             if (iface->parameters[i].name() == par.name()) {
                 toMatch[i] = t;
@@ -766,7 +765,7 @@ Optional<Value> NMethodCall::codeGen(CodeGenContext &context)
 
     size_t i = 0;
     auto info = context.functionInfo(function);
-    for (; i < function->getArgumentList().size(); ++i) {
+    for (auto it = function->arg_begin(); it != function->arg_end(); ++it, ++i) {
         auto converted = context.convertTo(firstclasses[i]->value(), firstclasses[i]->type(), info->argTypes[i]);
         if (!converted) {
             err(token(), "wrong argument type to function; expected '{}', found '{}'", info->argTypes[i].name(), firstclasses[i]->type().name());
@@ -1529,12 +1528,10 @@ Optional<Value> NCastExpression::codeGen(CodeGenContext &ctx)
                 return createValue(ctx, ctx.builder().CreateTrunc(firstclass->load(ctx), m_type.get(ctx)), m_type);
             } else if (castType->isFloatingPointTy()) {
                 auto val = ctx.builder().CreateSIToFP(firstclass->load(ctx), m_type.get(ctx));
-                val->getType()->dump();
                 return createValue(ctx, val, m_type);
             }
         } else if (type->isFloatingPointTy()) {
             if (castType->isIntegerTy()) {
-                firstclass->value()->dump();
                 auto val = ctx.builder().CreateFPToSI(firstclass->load(ctx), m_type.get(ctx));
                 return createValue(ctx, val, m_type);
             }

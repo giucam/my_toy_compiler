@@ -171,9 +171,6 @@ Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
         auto rhst = rhsValue->getType();
         bool sameType = lhst == rhst;
 
-        lhsExprs->value()->dump();
-        rhsExprs->value()->dump();
-
         llvm::Value *value = nullptr;
         if (lhst->isIntegerTy() && rhst->isIntegerTy()) {
             auto value = integerBinOp(rhs->token(), lhsValue, lhsExprs->type(), rhsValue, rhsExprs->type(), op, context);
