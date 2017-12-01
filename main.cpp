@@ -11,6 +11,8 @@
 
 using namespace std;
 
+bool abortOnError = false;
+
 struct Target
 {
     std::string triple;
@@ -114,6 +116,8 @@ int main(int argc, char **argv)
             checkOption(argv, i, argc, "-O", clangargs)) {
         } else if (strcmp(argv[i], "-shared") == 0) {
             clangargs.push_back("-shared");
+        } else if (strcmp(argv[i], "--abort") == 0) {
+            abortOnError = true;
         } else {
             inputfiles.push_back(argv[i]);
         }

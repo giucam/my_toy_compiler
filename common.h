@@ -7,6 +7,8 @@
 
 #include "lexer.h"
 
+extern bool abortOnError;
+
 template<class... Args>
 static void error(Args &&... args)
 {
@@ -32,7 +34,7 @@ struct Message
     bool firstLine;
 
     Message(Type t, const std::string &fname, int l, int c) : type(t), filename(fname), lineno(l), colno(c), firstLine(true) {}
-    ~Message() { if (type == Type::Error) abort(); }
+    ~Message() { if (type == Type::Error) abortOnError ? abort() : exit(2); }
 
     template<class... Args>
     Message &line(Args &&... args)
