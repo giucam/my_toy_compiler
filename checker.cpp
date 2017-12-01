@@ -297,6 +297,9 @@ static void checkInitializerList(Checker &checker, const Type &type, NInitialize
 {
     for (auto &&in: il->initializers()) {
         auto info = checker.structInfo(type.typeName());
+        if (!info) {
+            err(in.value->token(), "type '{}' is not a named aggregate type", type.name());
+        }
         for (auto &&field: info->fields) {
             if (field.name == in.name) {
                 auto t = in.value->visit(checker, field.type);
