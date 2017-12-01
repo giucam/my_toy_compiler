@@ -34,6 +34,31 @@ class NFunctionDeclaration;
 class TypeName;
 class CodeGenContext;
 class NFunctionArgumentDeclaration;
+class Node;
+class NInteger;
+class NBoolean;
+class NDouble;
+class NString;
+class NVariableDeclaration;
+class NMultiVariableDeclaration;
+class NExternVariableDeclaration;
+class NExternDeclaration;
+class NStructDeclaration;
+class NUnionDeclaration;
+class NImplDeclaration;
+class NEnumDeclaration;
+class NExpressionStatement;
+class NBinaryOperator;
+class NMethodCall;
+class NAssignment;
+class NAddressOfExpression;
+class NExpressionPack;
+class NIfStatement;
+class NWhileStatement;
+class NForStatement;
+class NReturnStatement;
+class NInitializerListExpression;
+class NCastExpression;
 
 class CodeGenBlock {
 public:
@@ -121,6 +146,36 @@ class CodeGenContext : public Stage
 {
 public:
     CodeGenContext(const std::string &name);
+
+    Optional<Value> visit(Node &) { return {}; }
+    Optional<Value> visit(NInteger &integer);
+    Optional<Value> visit(NBoolean &b);
+    Optional<Value> visit(NDouble &b);
+    Optional<Value> visit(NString &str);
+    Optional<Value> visit(NVariableDeclaration &decl);
+    Optional<Value> visit(NMultiVariableDeclaration &decl);
+    Optional<Value> visit(NExternVariableDeclaration &decl);
+    Optional<Value> visit(NIdentifier &ident);
+    Optional<Value> visit(NFunctionDeclaration &decl);
+    Optional<Value> visit(NExternDeclaration &decl);
+    Optional<Value> visit(NStructDeclaration &decl);
+    Optional<Value> visit(NUnionDeclaration &decl);
+    Optional<Value> visit(NIfaceDeclaration &decl);
+    Optional<Value> visit(NImplDeclaration &decl);
+    Optional<Value> visit(NEnumDeclaration &decl);
+    Optional<Value> visit(NBlock &block);
+    Optional<Value> visit(NExpressionStatement &expr);
+    Optional<Value> visit(NBinaryOperator &op);
+    Optional<Value> visit(NMethodCall &call);
+    Optional<Value> visit(NAssignment &ass);
+    Optional<Value> visit(NAddressOfExpression &addr);
+    Optional<Value> visit(NExpressionPack &pack);
+    Optional<Value> visit(NIfStatement &ifs);
+    Optional<Value> visit(NWhileStatement &ws);
+    Optional<Value> visit(NForStatement &fs);
+    Optional<Value> visit(NReturnStatement &ret);
+    Optional<Value> visit(NInitializerListExpression &init);
+    Optional<Value> visit(NCastExpression &cast);
 
     Debug &debug() { return m_debug; }
 

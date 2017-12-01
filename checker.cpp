@@ -254,26 +254,26 @@ Checker::FunctionInfo *Checker::functionInfo(const std::string &name)
 }
 
 
-Checker::ReturnType Checker::visit(Node &, HintType hint)
+Checker::ReturnType Checker::visit(Node &, const Type &hint)
 {
     return DummyType();
 }
 
-Checker::ReturnType Checker::visit(NInteger &integer, HintType hint)
+Checker::ReturnType Checker::visit(NInteger &integer, const Type &hint)
 {
     Type t = IntegerType(true, 32);
     t.setTypeConstraint(TypeConstraint(TypeConstraint::Operator::Equal, integer.value));
     return std::make_shared<Instance>(t);
 }
 
-Checker::ReturnType Checker::visit(NBoolean &b, HintType hint)
+Checker::ReturnType Checker::visit(NBoolean &b, const Type &hint)
 {
     Type t = IntegerType(false, 1);
     t.setTypeConstraint(TypeConstraint(TypeConstraint::Operator::Equal, b.value));
     return std::make_shared<Instance>(t);
 }
 
-Checker::ReturnType Checker::visit(NString &str, HintType )
+Checker::ReturnType Checker::visit(NString &str, const Type &)
 {
     auto t = Type(IntegerType(true, 8)).getPointerTo();
     return std::make_shared<Instance>(t);
@@ -306,7 +306,7 @@ static void checkInitializerList(Checker &checker, const Type &type, NInitialize
     }
 }
 
-Checker::ReturnType Checker::visit(NVariableDeclaration &decl, HintType hint)
+Checker::ReturnType Checker::visit(NVariableDeclaration &decl, const Type &hint)
 {
     auto &expr = static_cast<NVarExpressionInitializer *>(decl.m_init.get())->expression;
 
@@ -335,7 +335,7 @@ Checker::ReturnType Checker::visit(NVariableDeclaration &decl, HintType hint)
     return Declaration();
 }
 
-Checker::ReturnType Checker::visit(NIdentifier &ident, HintType hint)
+Checker::ReturnType Checker::visit(NIdentifier &ident, const Type &hint)
 {
     if (ident.context()) {
         auto ret = ident.context()->visit(*this);
@@ -384,7 +384,7 @@ Checker::ReturnType Checker::visit(NIdentifier &ident, HintType hint)
     return instance;
 }
 
-Checker::ReturnType Checker::visit(NBlock &block, HintType hint)
+Checker::ReturnType Checker::visit(NBlock &block, const Type &hint)
 {
     for (auto &&s: block.statements) {
         s->visit(*this);
@@ -393,7 +393,7 @@ Checker::ReturnType Checker::visit(NBlock &block, HintType hint)
 }
 
 
-Checker::ReturnType Checker::visit(NFunctionDeclaration &decl, HintType hint)
+Checker::ReturnType Checker::visit(NFunctionDeclaration &decl, const Type &hint)
 {
     pushBlock(currentBlock());
 
@@ -417,7 +417,7 @@ Checker::ReturnType Checker::visit(NFunctionDeclaration &decl, HintType hint)
     return Declaration();
 }
 
-Checker::ReturnType Checker::visit(NExternDeclaration &decl, HintType hint)
+Checker::ReturnType Checker::visit(NExternDeclaration &decl, const Type &hint)
 {
     auto info = functionInfo(decl.name());
     if (!info) {
@@ -429,7 +429,7 @@ Checker::ReturnType Checker::visit(NExternDeclaration &decl, HintType hint)
     return Declaration();
 }
 
-Checker::ReturnType Checker::visit(NStructDeclaration &decl, HintType hint)
+Checker::ReturnType Checker::visit(NStructDeclaration &decl, const Type &hint)
 {
     if (!decl.m_hasBody) {
         return Declaration();
@@ -470,7 +470,7 @@ static void pushIntegerConstraints(std::shared_ptr<Checker::Instance> lhs, std::
     }
 }
 
-Checker::ReturnType Checker::visit(NBinaryOperator &op, HintType hint)
+Checker::ReturnType Checker::visit(NBinaryOperator &op, const Type &hint)
 {
     auto lhsResult = op.lhs->visit(*this);
     auto rhsResult = op.rhs->visit(*this);
@@ -553,7 +553,7 @@ Checker::ReturnType Checker::visit(NBinaryOperator &op, HintType hint)
     return DummyType();
 }
 
-Checker::ReturnType Checker::visit(NMethodCall &call, HintType hint)
+Checker::ReturnType Checker::visit(NMethodCall &call, const Type &hint)
 {
     std::vector<std::shared_ptr<Instance>> args;
 
@@ -607,7 +607,7 @@ Checker::ReturnType Checker::visit(NMethodCall &call, HintType hint)
     return std::make_shared<Instance>(func->returnType);
 }
 
-Checker::ReturnType Checker::visit(NAddressOfExpression &addr, HintType hint)
+Checker::ReturnType Checker::visit(NAddressOfExpression &addr, const Type &hint)
 {
     auto ret = addr.expression()->visit(*this);
     auto instance = extractInstance(ret);
@@ -617,7 +617,7 @@ Checker::ReturnType Checker::visit(NAddressOfExpression &addr, HintType hint)
     return std::make_shared<Instance>(instance->type().getPointerTo());
 }
 
-Checker::ReturnType Checker::visit(NExpressionPack &pack, HintType hint)
+Checker::ReturnType Checker::visit(NExpressionPack &pack, const Type &hint)
 {
     if (pack.expressionList().size() == 1) {
         return pack.expressionList().front()->visit(*this);
@@ -636,7 +636,7 @@ Checker::ReturnType Checker::visit(NExpressionPack &pack, HintType hint)
     return std::make_shared<Instance>(TupleType(args));
 }
 
-Checker::ReturnType Checker::visit(NIfStatement &ifs, HintType hint)
+Checker::ReturnType Checker::visit(NIfStatement &ifs, const Type &hint)
 {
     auto curBlock = currentBlock();
     ifs.condition()->visit(*this);
@@ -667,19 +667,19 @@ Checker::ReturnType Checker::visit(NIfStatement &ifs, HintType hint)
     return DummyType();
 }
 
-Checker::ReturnType Checker::visit(NReturnStatement &, HintType hint)
+Checker::ReturnType Checker::visit(NReturnStatement &, const Type &hint)
 {
     currentBlock()->returned = true;
     return DummyType();
 }
 
-Checker::ReturnType Checker::visit(NInitializerListExpression &init, HintType hint)
+Checker::ReturnType Checker::visit(NInitializerListExpression &init, const Type &hint)
 {
     checkInitializerList(*this, hint, &init);
     return std::make_shared<Instance>(hint);
 }
 
-Checker::ReturnType Checker::visit(NCastExpression &cast, HintType hint)
+Checker::ReturnType Checker::visit(NCastExpression &cast, const Type &hint)
 {
     return std::make_shared<Instance>(cast.type());
 }

@@ -147,40 +147,40 @@ static llvm::Value *pointerIntBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue
     return nullptr;
 }
 
-Optional<Value> NBinaryOperator::codeGen(CodeGenContext &context)
+Optional<Value> CodeGenContext::visit(NBinaryOperator &op)
 {
-    auto rhsVal = rhs->codeGen(context);
+    auto rhsVal = op.rhs->visit(*this);
     auto rhsExprs = rhsVal->getSpecialization<FirstClassValue>();
-    auto lhsVal = lhs->codeGen(context);
+    auto lhsVal = op.lhs->visit(*this);
     auto lhsExprs = lhsVal->getSpecialization<FirstClassValue>();
 
-    fmt::print("binop {} {} - {}\n",lhsVal->type().name(), rhsVal->type().name(), token().lineNo());
+    fmt::print("binop {} {} - {}\n",lhsVal->type().name(), rhsVal->type().name(), op.token().lineNo());
 
 //     if (rhsExprs.size() != lhsExprs.size()) {
 //         err(token(), "both operands must have the same cardinality");
 //     }
 //     assert(rhsExprs.size() == 1);
 //     for (size_t i = 0; i < rhsExprs.size(); ++i) {
-        auto lhsValue = lhsExprs->load(context);
-        auto rhsValue = rhsExprs->load(context);
+        auto lhsValue = lhsExprs->load(*this);
+        auto rhsValue = rhsExprs->load(*this);
         auto lhst = lhsValue->getType();
         auto rhst = rhsValue->getType();
         bool sameType = lhst == rhst;
 
         llvm::Value *value = nullptr;
         if (lhst->isIntegerTy() && rhst->isIntegerTy()) {
-            return integerBinOp(rhs->token(), lhsValue, lhsExprs->type(), rhsValue, rhsExprs->type(), op, context);
+            return integerBinOp(op.rhs->token(), lhsValue, lhsExprs->type(), rhsValue, rhsExprs->type(), op.op, *this);
         } else if (lhst->isPointerTy() && sameType) {
-            value = pointerBinOp(lhsValue, rhsValue, op, context);
+            value = pointerBinOp(lhsValue, rhsValue, op.op, *this);
         } else if (lhst->isFloatingPointTy() && sameType) {
-            value = floatBinOp(lhsValue, rhsValue, op, context);
+            value = floatBinOp(lhsValue, rhsValue, op.op, *this);
         } else if (lhst->isPointerTy() && rhst->isIntegerTy()) {
-            value = pointerIntBinOp(lhsValue, rhsValue, op, context);
+            value = pointerIntBinOp(lhsValue, rhsValue, op.op, *this);
         }
         if (!value) {
-            err(token(), "invalid operands '{}' and '{}' for binary expression", lhsExprs->type().name(), rhsExprs->type().name());
+            err(op.token(), "invalid operands '{}' and '{}' for binary expression", lhsExprs->type().name(), rhsExprs->type().name());
         }
-        return simpleValue(value, llvmType(context, value->getType()));
+        return simpleValue(value, llvmType(*this, value->getType()));
 //     }
     return {};
 }

@@ -106,28 +106,27 @@ public:
     struct DummyType {};
 
     using ReturnType = std::variant<std::shared_ptr<Instance>, Declaration, DummyType>;
-    using HintType = const Type &;
 
     Checker();
 
-    ReturnType visit(Node &, HintType hint);
-    ReturnType visit(NInteger &integer, HintType hint);
-    ReturnType visit(NBoolean &b, HintType hint);
-    ReturnType visit(NString &str, HintType hint);
-    ReturnType visit(NVariableDeclaration &decl, HintType hint);
-    ReturnType visit(NIdentifier &ident, HintType hint);
-    ReturnType visit(NFunctionDeclaration &decl, HintType hint);
-    ReturnType visit(NExternDeclaration &decl, HintType hint);
-    ReturnType visit(NStructDeclaration &decl, HintType hint);
-    ReturnType visit(NBlock &block, HintType hint);
-    ReturnType visit(NBinaryOperator &op, HintType hint);
-    ReturnType visit(NMethodCall &call, HintType hint);
-    ReturnType visit(NAddressOfExpression &addr, HintType hint);
-    ReturnType visit(NExpressionPack &pack, HintType hint);
-    ReturnType visit(NIfStatement &ifs, HintType hint);
-    ReturnType visit(NReturnStatement &ret, HintType hint);
-    ReturnType visit(NInitializerListExpression &init, HintType hint);
-    ReturnType visit(NCastExpression &cast, HintType hint);
+    ReturnType visit(Node &, const Type &hint);
+    ReturnType visit(NInteger &integer, const Type &hint);
+    ReturnType visit(NBoolean &b, const Type &hint);
+    ReturnType visit(NString &str, const Type &hint);
+    ReturnType visit(NVariableDeclaration &decl, const Type &hint);
+    ReturnType visit(NIdentifier &ident, const Type &hint);
+    ReturnType visit(NFunctionDeclaration &decl, const Type &hint);
+    ReturnType visit(NExternDeclaration &decl, const Type &hint);
+    ReturnType visit(NStructDeclaration &decl, const Type &hint);
+    ReturnType visit(NBlock &block, const Type &hint);
+    ReturnType visit(NBinaryOperator &op, const Type &hint);
+    ReturnType visit(NMethodCall &call, const Type &hint);
+    ReturnType visit(NAddressOfExpression &addr, const Type &hint);
+    ReturnType visit(NExpressionPack &pack, const Type &hint);
+    ReturnType visit(NIfStatement &ifs, const Type &hint);
+    ReturnType visit(NReturnStatement &ret, const Type &hint);
+    ReturnType visit(NInitializerListExpression &init, const Type &hint);
+    ReturnType visit(NCastExpression &cast, const Type &hint);
 
     void inject(Node *node, InjectScope scope) override;
     int typeSize(const Type &t) override;
