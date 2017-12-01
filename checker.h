@@ -11,6 +11,7 @@
 
 class Node;
 class NInteger;
+class NDouble;
 class NBoolean;
 class NString;
 class NVariableDeclaration;
@@ -111,6 +112,7 @@ public:
 
     ReturnType visit(Node &, const Type &hint);
     ReturnType visit(NInteger &integer, const Type &hint);
+    ReturnType visit(NDouble &d, const Type &hint);
     ReturnType visit(NBoolean &b, const Type &hint);
     ReturnType visit(NString &str, const Type &hint);
     ReturnType visit(NVariableDeclaration &decl, const Type &hint);

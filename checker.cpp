@@ -266,6 +266,12 @@ Checker::ReturnType Checker::visit(NInteger &integer, const Type &hint)
     return std::make_shared<Instance>(t);
 }
 
+Checker::ReturnType Checker::visit(NDouble &d, const Type &hint)
+{
+    Type t = FloatingType(64);
+    return std::make_shared<Instance>(t);
+}
+
 Checker::ReturnType Checker::visit(NBoolean &b, const Type &hint)
 {
     Type t = IntegerType(false, 1);
