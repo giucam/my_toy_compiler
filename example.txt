@@ -38,17 +38,17 @@ struct foo {
     s1: *S1;
 }
 
-impl printable(foo) {
+// impl printable(foo) {
     func printValue(value: *foo): void {
         printf("foo: { ddd: %d, pupu: %d, s1.f: %d }", value.ddd, value.pupu, value.s1.f);
     }
-}
+// }
 
-impl printable(S1) {
+// impl printable(S1) {
     func printValue(value: S1): void {
         printf("S1: %d", value.f);
     }
-}
+// }
 
 //
 // func onfoo(a: *foo): *foo
@@ -126,8 +126,8 @@ bb.ddd = 45;
     print("t1 {}, tup {}\n",t1,tup);
 //     print(tup.1.0);
 
-let tup = (2,3,bla);
-let aaa = tup.2.ddd;
+let tupp = (2,3,bla);
+let aaa = tupp.2.ddd;
 
 let mut i = 0;
 while (i < 10) {

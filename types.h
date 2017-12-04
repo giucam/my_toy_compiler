@@ -32,12 +32,12 @@ public:
         LesserEqual,
     };
     TypeConstraint();
-    TypeConstraint(Operator op, int v);
+    TypeConstraint(Operator op, long long v);
 
     bool isCompatibleWith(const TypeConstraint &c) const;
     std::string name() const;
 
-    void addConstraint(Operator op, int v);
+    void addConstraint(Operator op, long long v);
     void add(const TypeConstraint &c, const void *source);
     void addNegate(const TypeConstraint &c, const void *source);
     void addGreaterEqual(const TypeConstraint &c, const void *source);
@@ -51,7 +51,7 @@ public:
 private:
     struct Constraint {
         Operator op;
-        int value;
+        long long value;
         const void *source;
     };
     std::vector<Constraint> m_constraints;
@@ -211,13 +211,20 @@ class ArgumentPackType
 {
     TYPE_SPECIALIZATION
 public:
-    ArgumentPackType() {}
+    ArgumentPackType() : m_variadic(true) {}
+    ArgumentPackType(std::vector<Type> types) : m_variadic(false) { m_types = std::move(types); }
 
     llvm::Type *get(CodeGenContext &ctx) const;
     void initialize(Stage &stage) {}
     std::string name() const;
+    const std::vector<Type> &types() const { return m_types; }
+    bool isVariadic() const { return m_variadic; }
 
     Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
+private:
+    bool m_variadic;
+    std::vector<Type> m_types;
 };
 
 class TupleType
@@ -293,6 +300,22 @@ public:
 
 private:
     Token m_token;
+    std::string m_name;
+};
+
+class TemplateType
+{
+    TYPE_SPECIALIZATION
+public:
+    TemplateType(const std::string &name);
+
+    llvm::Type *get(CodeGenContext &ctx) const;
+    void initialize(Stage &stage);
+    std::string name() const;
+
+    Value create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const;
+
+private:
     std::string m_name;
 };
 

@@ -147,11 +147,11 @@ static llvm::Value *pointerIntBinOp(llvm::Value *lhsValue, llvm::Value *rhsValue
     return nullptr;
 }
 
-Optional<Value> CodeGenContext::visit(NBinaryOperator &op)
+Optional<Value> CodeGenContext::visit(NBinaryOperator &op, int pass)
 {
-    auto rhsVal = op.rhs->visit(*this);
+    auto rhsVal = op.rhs->visit(*this, pass);
     auto rhsExprs = rhsVal->getSpecialization<FirstClassValue>();
-    auto lhsVal = op.lhs->visit(*this);
+    auto lhsVal = op.lhs->visit(*this, pass);
     auto lhsExprs = lhsVal->getSpecialization<FirstClassValue>();
 
     fmt::print("binop {} {} - {}\n",lhsVal->type().name(), rhsVal->type().name(), op.token().lineNo());

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <stack>
 #include <variant>
+#include <map>
 
 #include "stage.h"
 #include "types.h"
@@ -15,10 +16,17 @@ class NDouble;
 class NBoolean;
 class NString;
 class NVariableDeclaration;
+class NMultiVariableDeclaration;
+class NExternVariableDeclaration;
 class NIdentifier;
+class NAssignment;
 class NFunctionDeclaration;
 class NExternDeclaration;
 class NStructDeclaration;
+class NUnionDeclaration;
+class NEnumDeclaration;
+class NIfaceDeclaration;
+class NImplDeclaration;
 class NBlock;
 class NBinaryOperator;
 class NMethodCall;
@@ -28,6 +36,12 @@ class NIfStatement;
 class NReturnStatement;
 class NInitializerListExpression;
 class NCastExpression;
+class NExpressionStatement;
+class NForStatement;
+class NWhileStatement;
+class NExpression;
+class NStatement;
+class NSizeofExpression;
 
 class Checker : public Stage
 {
@@ -64,7 +78,9 @@ public:
         struct Void {};
         struct ArgPack {};
         struct DynArray {};
+        struct Array {};
         struct DeclaredAggregate {};
+        struct Templated {};
 
         template<class T>
         T *kind() { return std::get_if<T>(&m_kind); }
@@ -73,7 +89,7 @@ public:
 
     private:
         Type m_type;
-        std::variant<Aggregate, Tuple, Pointer, Primitive, Void, ArgPack, DynArray, DeclaredAggregate> m_kind;
+        std::variant<Aggregate, Tuple, Pointer, Primitive, Void, ArgPack, DynArray, Array, DeclaredAggregate, Templated> m_kind;
     };
 
     struct StructInfo {
@@ -93,11 +109,13 @@ public:
         std::shared_ptr<Instance> local(const std::string &name);
     };
     struct FunctionInfo {
+        std::string name;
+        bool varargs;
         bool defined;
         Type returnType;
         struct Arg {
             std::string name;
-            std::shared_ptr<Instance> instance;
+            Type type;
         };
         std::vector<Arg> args;
     };
@@ -116,10 +134,17 @@ public:
     ReturnType visit(NBoolean &b, const Type &hint);
     ReturnType visit(NString &str, const Type &hint);
     ReturnType visit(NVariableDeclaration &decl, const Type &hint);
+    ReturnType visit(NMultiVariableDeclaration &decl, const Type &hint);
+    ReturnType visit(NExternVariableDeclaration &decl, const Type &hint);
     ReturnType visit(NIdentifier &ident, const Type &hint);
+    ReturnType visit(NAssignment &ass, const Type &hint);
     ReturnType visit(NFunctionDeclaration &decl, const Type &hint);
     ReturnType visit(NExternDeclaration &decl, const Type &hint);
     ReturnType visit(NStructDeclaration &decl, const Type &hint);
+    ReturnType visit(NUnionDeclaration &decl, const Type &hint);
+    ReturnType visit(NEnumDeclaration &decl, const Type &hint);
+    ReturnType visit(NIfaceDeclaration &decl, const Type &hint);
+    ReturnType visit(NImplDeclaration &decl, const Type &hint);
     ReturnType visit(NBlock &block, const Type &hint);
     ReturnType visit(NBinaryOperator &op, const Type &hint);
     ReturnType visit(NMethodCall &call, const Type &hint);
@@ -129,10 +154,13 @@ public:
     ReturnType visit(NReturnStatement &ret, const Type &hint);
     ReturnType visit(NInitializerListExpression &init, const Type &hint);
     ReturnType visit(NCastExpression &cast, const Type &hint);
+    ReturnType visit(NExpressionStatement &s, const Type &hint);
+    ReturnType visit(NForStatement &s, const Type &hint);
+    ReturnType visit(NWhileStatement &w, const Type &hint);
+    ReturnType visit(NSizeofExpression &so, const Type &hint);
 
     void inject(Node *node, InjectScope scope) override;
-    int typeSize(const Type &t) override;
-    bool isFunctionDefined(const std::string &name) const override;
+    bool isFunctionDefined(const std::string &name, const std::vector<Type> &args) const override;
 
     const StructInfo *structInfo(llvm::Type *type) const;
     StructInfo *structInfo(llvm::Type *type);
@@ -148,12 +176,28 @@ public:
     void popBlock();
 
     FunctionInfo *addFunctionInfo(const std::string &name);
-    FunctionInfo *functionInfo(const std::string &name);
+    FunctionInfo *functionInfo(const std::string &name, const std::vector<Type> &types);
+
+    void addFunctionTemplate(NFunctionDeclaration *func);
+    FunctionInfo *functionTemplate(const std::string &name, const std::vector<std::shared_ptr<Instance>> args);
+    FunctionInfo *makeConcreteFunction(NFunctionDeclaration *func, const std::vector<std::shared_ptr<Instance>> args);
+
+    void storeGlobal(const std::string &name, const std::shared_ptr<Instance> &value);
+    std::shared_ptr<Instance> global(const std::string &name) const;
+
+    NBlock *rootBlock() const { return m_rootBlock; }
 
 private:
+    void addStatement(NStatement *s);
+
+    NBlock *m_currentBlock = nullptr;
+    NBlock *m_rootBlock = nullptr;
     std::unordered_map<std::string, StructInfo> m_structInfo;
     std::stack<CodeGenBlock> m_blocks;
-    std::unordered_map<std::string, FunctionInfo> m_functionInfo;
+    std::multimap<std::string, FunctionInfo> m_functionInfo;
+    std::unordered_map<std::string, NFunctionDeclaration *> m_functionTemplates;
+    std::unordered_map<std::string, std::shared_ptr<Instance>> m_globals;
+    std::unique_ptr<NExpression> m_expression;
 };
 
 #endif

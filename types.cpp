@@ -34,7 +34,7 @@ TypeConstraint::TypeConstraint()
 {
 }
 
-TypeConstraint::TypeConstraint(TypeConstraint::Operator op, int v)
+TypeConstraint::TypeConstraint(TypeConstraint::Operator op, long long v)
 {
     m_constraints.push_back({ op, v, nullptr });
 }
@@ -139,7 +139,7 @@ bool TypeConstraint::isCompatibleWith(const TypeConstraint &c) const
     return compat;
 }
 
-void TypeConstraint::addConstraint(Operator op, int v)
+void TypeConstraint::addConstraint(Operator op, long long v)
 {
     m_constraints.push_back({ op, v, nullptr });
 }
@@ -493,7 +493,20 @@ llvm::Type *ArgumentPackType::get(CodeGenContext &ctx) const
 
 std::string ArgumentPackType::name() const
 {
-    return "(...)";
+    if (isVariadic()) {
+        return "(...)";
+    }
+
+    std::string n = "Pack(";
+    int i = 0;
+    for (auto &&t: m_types) {
+        if (i++ > 0) {
+            n += ", ";
+        }
+        n += t.name();
+    }
+    n += ")";
+    return n;
 }
 
 Value ArgumentPackType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &name, const Type &type, const Value &storeValue) const
@@ -721,8 +734,6 @@ llvm::Type *DynamicArrayType::get(CodeGenContext &ctx) const
                         };
     m_type = llvm::StructType::get(ctx.context(), llvm::makeArrayRef(types, 3));
 
-    const_cast<DynamicArrayType *>(this)->initialize(ctx);
-
     return m_type;
 }
 
@@ -733,14 +744,19 @@ void DynamicArrayType::initialize(Stage &stage)
     }
     m_initializing = true;
 
-    auto appendName = std::string("append_") + name() + "_" + m_elmType.name();
-    if (!stage.isFunctionDefined(appendName)) {
-        int elmSize = stage.typeSize(m_elmType) / 8;
-        auto vecType = Type(*this).getPointerTo();
+    auto vecType = Type(*this).getPointerTo();
+    auto appendName = std::string("append");
 
+    auto baseVecType = []() {
+        std::vector<Type> vec = { Type(IntegerType(true, 8)).getPointerTo(), IntegerType(true, 32), IntegerType(true, 32) };
+        return Type(TupleType(vec)).getPointerTo();
+    }();
+    auto baseElmType = Type(IntegerType(true, 8)).getPointerTo();
+
+    if (!stage.isFunctionDefined(appendName, { vecType, m_elmType })) {
         {
-        std::vector<NFunctionArgumentDeclaration> baseLibAppendArgs = { { Token(), "vector", vecType, true },
-                                                                        { Token(), "element", m_elmType.getPointerTo(), true },
+        std::vector<NFunctionArgumentDeclaration> baseLibAppendArgs = { { Token(), "vector", baseVecType, true },
+                                                                        { Token(), "element", baseElmType, true },
                                                                         { Token(), "elmSize", IntegerType(true, 32), true } };
         NExternDeclaration baseLibAppendFunc("__base_lib__vector_append", VoidType(), baseLibAppendArgs, false);
         stage.inject(&baseLibAppendFunc, Stage::InjectScope::Global);
@@ -749,59 +765,63 @@ void DynamicArrayType::initialize(Stage &stage)
                                                                     { Token(), "element", m_elmType, true } };
         NBlock appendBlock;
         ExpressionList appendExprs;
-        appendExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
-        appendExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "element")));
-        appendExprs.push_back(std::move(std::make_unique<NInteger>(Token(), elmSize)));
+        appendExprs.push_back(std::move(std::make_unique<NCastExpression>(Token(), std::make_unique<NIdentifier>(Token(), "vector"), baseVecType)));
+        appendExprs.push_back(std::move(std::make_unique<NCastExpression>(Token(),
+                                                                          std::make_unique<NAddressOfExpression>(Token(),
+                                                                                                                 std::make_unique<NIdentifier>(Token(), "element")), baseElmType)));
+        appendExprs.push_back(std::move(std::make_unique<NSizeofExpression>(Token(), m_elmType)));
         appendBlock.statements.push_back(new NExpressionStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_append", appendExprs)));
         NFunctionDeclaration appendFunc(Token(), appendName, VoidType(), appendArgs, &appendBlock);
         stage.inject(&appendFunc, Stage::InjectScope::Global);
         }
 
         {
-        std::vector<NFunctionArgumentDeclaration> baseLibClearArgs = { { Token(), "vector", vecType, true } };
+        std::vector<NFunctionArgumentDeclaration> baseLibClearArgs = { { Token(), "vector", baseVecType, true } };
         NExternDeclaration baseLibClearFunc("__base_lib__vector_clear", VoidType(), baseLibClearArgs, false);
         stage.inject(&baseLibClearFunc, Stage::InjectScope::Global);
 
-        auto clearName = std::string("clear_") + name();
+        auto clearName = std::string("clear");
         std::vector<NFunctionArgumentDeclaration> clearArgs = { { Token(), "vector", vecType, true } };
         NBlock clearBlock;
         ExpressionList clearExprs;
-        clearExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
+        clearExprs.push_back(std::move(std::make_unique<NCastExpression>(Token(), std::make_unique<NIdentifier>(Token(), "vector"), baseVecType)));
         clearBlock.statements.push_back(new NExpressionStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_clear", clearExprs)));
         NFunctionDeclaration clearFunc(Token(), clearName, VoidType(), clearArgs, &clearBlock);
         stage.inject(&clearFunc, Stage::InjectScope::Global);
         }
 
         {
-        std::vector<NFunctionArgumentDeclaration> baseLibOpArgs = { { Token(), "vector", vecType, true },
+        std::vector<NFunctionArgumentDeclaration> baseLibOpArgs = { { Token(), "vector", baseVecType, true },
                                                                     { Token(), "elmSize", IntegerType(true, 32), true },
                                                                     { Token(), "index", IntegerType(true, 32), true } };
-        NExternDeclaration baseLibOpFunc("__base_lib__vector_element", m_elmType.getPointerTo(), baseLibOpArgs, false);
+        NExternDeclaration baseLibOpFunc("__base_lib__vector_element", baseElmType, baseLibOpArgs, false);
         stage.inject(&baseLibOpFunc, Stage::InjectScope::Global);
 
-        auto opName = std::string("operator[]_") + name() + "_i32";
+        auto opName = std::string("operator[]");
         std::vector<NFunctionArgumentDeclaration> opArgs = { { Token(), "vector", vecType, true },
                                                                 { Token(), "index", IntegerType(true, 32), true } };
         NBlock opBlock;
         ExpressionList opExprs;
-        opExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
-        opExprs.push_back(std::move(std::make_unique<NInteger>(Token(), elmSize)));
+        opExprs.push_back(std::move(std::make_unique<NCastExpression>(Token(), std::make_unique<NIdentifier>(Token(), "vector"), baseVecType)));
+        opExprs.push_back(std::move(std::make_unique<NSizeofExpression>(Token(), m_elmType)));
         opExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "index")));
-        opBlock.statements.push_back(new NReturnStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_element", opExprs)));
+        opBlock.statements.push_back(new NReturnStatement(std::make_unique<NCastExpression>(Token(),
+                                                                                            std::make_unique<NMethodCall>(Token(),
+                                                                                                                          "__base_lib__vector_element", opExprs), m_elmType.getPointerTo())));
         NFunctionDeclaration opFunc(Token(), opName, m_elmType.getPointerTo(), opArgs, &opBlock);
         stage.inject(&opFunc, Stage::InjectScope::Global);
         }
 
         {
-        std::vector<NFunctionArgumentDeclaration> baseLibCountArgs = { { Token(), "vector", vecType, true } };
+        std::vector<NFunctionArgumentDeclaration> baseLibCountArgs = { { Token(), "vector", baseVecType, true } };
         NExternDeclaration baseLibCountFunc("__base_lib__vector_count", IntegerType(true, 32), baseLibCountArgs, false);
         stage.inject(&baseLibCountFunc, Stage::InjectScope::Global);
 
-        auto countName = std::string("count_") + name();
+        auto countName = std::string("count");
         std::vector<NFunctionArgumentDeclaration> countArgs = { { Token(), "vector", vecType, true } };
         NBlock countBlock;
         ExpressionList countExprs;
-        countExprs.push_back(std::move(std::make_unique<NIdentifier>(Token(), "vector")));
+        countExprs.push_back(std::move(std::make_unique<NCastExpression>(Token(), std::make_unique<NIdentifier>(Token(), "vector"), baseVecType)));
         countBlock.statements.push_back(new NReturnStatement(std::make_unique<NMethodCall>(Token(), "__base_lib__vector_count", countExprs)));
         NFunctionDeclaration countFunc(Token(), countName, IntegerType(true, 32), countArgs, &countBlock);
         stage.inject(&countFunc, Stage::InjectScope::Global);
@@ -833,4 +853,31 @@ Value DynamicArrayType::count(CodeGenContext &ctx, const Value &arr) const
     auto v = ctx.builder().CreateInBoundsGEP(arr.getSpecialization<FirstClassValue>()->value(), { ctx.builder().getInt32(0), ctx.builder().getInt32(1) });
     v = ctx.builder().CreateLoad(v);
     return simpleValue(v, IntegerType(true, 32));
+}
+
+
+
+
+TemplateType::TemplateType(const std::string &name)
+            : m_name(name)
+{
+}
+
+llvm::Type *TemplateType::get(CodeGenContext &ctx) const
+{
+    return nullptr;
+}
+
+void TemplateType::initialize(Stage &stage)
+{
+}
+
+std::string TemplateType::name() const
+{
+    return m_name;
+}
+
+Value TemplateType::create(CodeGenContext &ctx, Allocator *alloc, const std::string &varName, const Type &type, const Value &storeValue) const
+{
+    return {};
 }

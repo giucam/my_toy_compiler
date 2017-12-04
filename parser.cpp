@@ -325,7 +325,7 @@ void Parser::parseLet()
         auto expr = parseExpression();
 
         if (!isMulti) {
-            var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, Type(), std::move(expr)));
+            var = new NVariableDeclaration(letTok, varName, Type(), std::move(expr));
         } else {
             var = new NMultiVariableDeclaration(letTok, nameToks, std::move(expr));
         }
@@ -334,7 +334,7 @@ void Parser::parseLet()
         checkTokenType(nextToken(), Token::Type::Equal);
 
         auto expr = parseExpression();
-        var = new NVariableDeclaration(letTok, varName, std::make_unique<NVarExpressionInitializer>(tok, type, std::move(expr)));
+        var = new NVariableDeclaration(letTok, varName, type, std::move(expr));
     } else {
         err(tok, "':' or '=' expected");
     }
@@ -734,9 +734,7 @@ Type Parser::parseType()
         auto t = parseType();
         nextToken(Token::Type::RightBracket);
         type = DynamicArrayType(t);
-    } else {
-        checkTokenType(typeTok, Token::Type::Identifier);
-
+    } else if (typeTok.type() == Token::Type::Identifier) {
         auto name = typeTok.text();
         if (name == "void") {
             if (pointer == 0) {
@@ -769,6 +767,11 @@ Type Parser::parseType()
         } else {
             type = CustomType(typeTok, typeTok.text());
         }
+    } else {
+        checkTokenType(typeTok, Token::Type::Dollar);
+        auto nameTok = nextToken(Token::Type::Identifier);
+
+        type = TemplateType(nameTok.text());
     }
 
     if (m_lexer.peekToken().type() == Token::Type::Pipe) {

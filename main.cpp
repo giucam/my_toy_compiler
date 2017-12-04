@@ -148,7 +148,7 @@ int main(int argc, char **argv)
         CodeGenContext context(file);
         context.module().setTargetTriple(target.triple);
         context.module().setDataLayout(target.dataLayout);
-        context.generateCode(programBlock);
+        context.generateCode(*checker.rootBlock());
 
         file += ".ll";
         context.writeOutput(file);

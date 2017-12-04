@@ -59,6 +59,7 @@ class NForStatement;
 class NReturnStatement;
 class NInitializerListExpression;
 class NCastExpression;
+class NSizeofExpression;
 
 class CodeGenBlock {
 public:
@@ -147,35 +148,36 @@ class CodeGenContext : public Stage
 public:
     CodeGenContext(const std::string &name);
 
-    Optional<Value> visit(Node &) { return {}; }
-    Optional<Value> visit(NInteger &integer);
-    Optional<Value> visit(NBoolean &b);
-    Optional<Value> visit(NDouble &b);
-    Optional<Value> visit(NString &str);
-    Optional<Value> visit(NVariableDeclaration &decl);
-    Optional<Value> visit(NMultiVariableDeclaration &decl);
-    Optional<Value> visit(NExternVariableDeclaration &decl);
-    Optional<Value> visit(NIdentifier &ident);
-    Optional<Value> visit(NFunctionDeclaration &decl);
-    Optional<Value> visit(NExternDeclaration &decl);
-    Optional<Value> visit(NStructDeclaration &decl);
-    Optional<Value> visit(NUnionDeclaration &decl);
-    Optional<Value> visit(NIfaceDeclaration &decl);
-    Optional<Value> visit(NImplDeclaration &decl);
-    Optional<Value> visit(NEnumDeclaration &decl);
-    Optional<Value> visit(NBlock &block);
-    Optional<Value> visit(NExpressionStatement &expr);
-    Optional<Value> visit(NBinaryOperator &op);
-    Optional<Value> visit(NMethodCall &call);
-    Optional<Value> visit(NAssignment &ass);
-    Optional<Value> visit(NAddressOfExpression &addr);
-    Optional<Value> visit(NExpressionPack &pack);
-    Optional<Value> visit(NIfStatement &ifs);
-    Optional<Value> visit(NWhileStatement &ws);
-    Optional<Value> visit(NForStatement &fs);
-    Optional<Value> visit(NReturnStatement &ret);
-    Optional<Value> visit(NInitializerListExpression &init);
-    Optional<Value> visit(NCastExpression &cast);
+    Optional<Value> visit(Node &, int pass) { return {}; }
+    Optional<Value> visit(NInteger &integer, int pass);
+    Optional<Value> visit(NBoolean &b, int pass);
+    Optional<Value> visit(NDouble &b, int pass);
+    Optional<Value> visit(NString &str, int pass);
+    Optional<Value> visit(NVariableDeclaration &decl, int pass);
+    Optional<Value> visit(NMultiVariableDeclaration &decl, int pass);
+    Optional<Value> visit(NExternVariableDeclaration &decl, int pass);
+    Optional<Value> visit(NIdentifier &ident, int pass);
+    Optional<Value> visit(NFunctionDeclaration &decl, int pass);
+    Optional<Value> visit(NExternDeclaration &decl, int pass);
+    Optional<Value> visit(NStructDeclaration &decl, int pass);
+    Optional<Value> visit(NUnionDeclaration &decl, int pass);
+    Optional<Value> visit(NIfaceDeclaration &decl, int pass);
+    Optional<Value> visit(NImplDeclaration &decl, int pass);
+    Optional<Value> visit(NEnumDeclaration &decl, int pass);
+    Optional<Value> visit(NBlock &block, int pass);
+    Optional<Value> visit(NExpressionStatement &expr, int pass);
+    Optional<Value> visit(NBinaryOperator &op, int pass);
+    Optional<Value> visit(NMethodCall &call, int pass);
+    Optional<Value> visit(NAssignment &ass, int pass);
+    Optional<Value> visit(NAddressOfExpression &addr, int pass);
+    Optional<Value> visit(NExpressionPack &pack, int pass);
+    Optional<Value> visit(NIfStatement &ifs, int pass);
+    Optional<Value> visit(NWhileStatement &ws, int pass);
+    Optional<Value> visit(NForStatement &fs, int pass);
+    Optional<Value> visit(NReturnStatement &ret, int pass);
+    Optional<Value> visit(NInitializerListExpression &init, int pass);
+    Optional<Value> visit(NCastExpression &cast, int pass);
+    Optional<Value> visit(NSizeofExpression &so, int pass);
 
     Debug &debug() { return m_debug; }
 
@@ -205,9 +207,6 @@ public:
     NIfaceDeclaration *interface(const std::string &name) const;
     void addInterface(NIfaceDeclaration *iface);
 
-    llvm::Function *functionTemplate(const std::string &name, std::vector<FirstClassValue *> &values);
-    void addFunctionTemplate(NFunctionDeclaration *func);
-
     FunctionInfo *addFunctionInfo(llvm::Function *function);
     const FunctionInfo *functionInfo(llvm::Function *function) const;
 
@@ -235,8 +234,8 @@ public:
     CodeGenBlock *allocationBlock() const { return m_allocationBlock; }
 
     void inject(Node *node, InjectScope scope);
-    int typeSize(const Type &t) override;
-    bool isFunctionDefined(const std::string &name) const override;
+    int typeSize(const Type &t);
+    bool isFunctionDefined(const std::string &name, const std::vector<Type> &args) const override;
 
 private:
     llvm::Function *makeConcreteFunction(NFunctionDeclaration *func, std::vector<FirstClassValue *> &values);
@@ -256,8 +255,6 @@ private:
     std::unordered_map<llvm::Type *, TupleInfo> m_tupleInfo;
     std::unordered_map<std::string, NIfacePrototype *> m_ifacePrototypes;
     std::unordered_map<std::string, NIfaceDeclaration *> m_interfaces;
-    std::unordered_map<std::string, NFunctionDeclaration *> m_functionTemplates;
-    std::unordered_map<std::string, llvm::Function *> m_concreteTemplates;
     std::unordered_map<std::string, Value> m_globals;
     std::unordered_map<llvm::Function *, FunctionInfo> m_functionInfo;
     std::unordered_map<std::string, llvm::Type *> m_declaredTypes;

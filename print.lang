@@ -2,38 +2,42 @@
 import "C" "stdio.h";
 import "C" "string.h";
 
-iface printable(A) {
-    func printValue(A);
-}
+// iface printable(A) {
+//     func printValue(A);
+// }
 
-impl printable(i32) {
+// impl printable(i32) {
     func printValue(value: i32): void {
         printf("%d", value);
     }
-}
+// }
 
-impl printable(f64) {
+// impl printable(f64) {
     func printValue(value: f64): void {
         printf("%f", value);
     }
-}
+// }
 
-impl printable(*i8) {
+// impl printable(*i8) {
     func printValue(val: *i8): void {
         fwrite(val, 1, strlen(val), stdout);
     }
-}
+// }
 
-impl printable(i8) {
+// impl printable(i8) {
     func printValue(val: i8): void {
         printf("%c", val);
     }
-}
+// }
 
-impl printable(()) {
+// impl printable(()) {
     func printValue(): void {
     }
-}
+
+    func printValue(v: u32): void {
+        printf("%u", v);
+    }
+// }
 
 func print(format: *i8, values: (...)): void
 {

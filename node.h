@@ -40,22 +40,22 @@ public:
         m_callChecker = std::make_unique<Concrete<T>>();
     }
 
-    Optional<Value> visit(CodeGenContext &c) { return m_callChecker->visit(this, c); }
+    Optional<Value> visit(CodeGenContext &c, int pass) { return m_callChecker->visit(this, c, pass); }
     Checker::ReturnType visit(Checker &c, const Type &hint = VoidType()) { return m_callChecker->visit(this, c, hint); }
 
     const Token &token() const { return m_token; }
 
 private:
     struct Interface {
-        virtual Optional<Value> visit(Node *n, CodeGenContext &c) = 0;
+        virtual Optional<Value> visit(Node *n, CodeGenContext &c, int pass) = 0;
         virtual Checker::ReturnType visit(Node *n, Checker &c, const Type &h) = 0;
     };
     template<class T>
     struct Concrete : Interface
     {
-        Optional<Value> visit(Node *n, CodeGenContext &c) override
+        Optional<Value> visit(Node *n, CodeGenContext &c, int pass) override
         {
-            return c.visit(*static_cast<T *>(n));
+            return c.visit(*static_cast<T *>(n), pass);
         }
         Checker::ReturnType visit(Node *n, Checker &c, const Type &h) override
         {
@@ -254,29 +254,14 @@ private:
     bool m_mut;
 };
 
-class NVariableInitializer
-{
-public:
-    virtual Value init(CodeGenContext &ctx, const std::string &name) = 0;
-};
-
-class NVarExpressionInitializer : public NVariableInitializer
-{
-public:
-    NVarExpressionInitializer(const Token &tok, const Type &type, std::unique_ptr<NExpression> expr) : token(tok), type(type), expression(std::move(expr)) {}
-
-    Value init(CodeGenContext &ctx, const std::string &name) override;
-
-    Token token;
-    Type type;
-    std::unique_ptr<NExpression> expression;
-};
-
 class NVariableDeclaration : public NStatement {
 public:
     NVariableName id;
-    std::unique_ptr<NVariableInitializer> m_init;
-    NVariableDeclaration(const Token &tok, const NVariableName &name, std::unique_ptr<NVariableInitializer> in) : NStatement(tok), id(name), m_init(std::move(in)) { init(this); }
+    Type declaredType;
+    std::unique_ptr<NExpression> expression;
+
+    NVariableDeclaration(const Token &tok, const NVariableName &name, const Type &type, std::unique_ptr<NExpression> expr)
+        : NStatement(tok), id(name), declaredType(type), expression(std::move(expr)) { init(this); }
 };
 
 class NMultiVariableDeclaration : public NStatement {
@@ -525,6 +510,13 @@ public:
 
 private:
     std::vector<Initializer> m_initializers;
+};
+
+class NSizeofExpression : public NExpression
+{
+public:
+    NSizeofExpression(const Token &tok, const Type &t) : NExpression(tok), type(t) { init(this); }
+    Type type;
 };
 
 #endif

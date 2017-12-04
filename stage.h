@@ -3,6 +3,7 @@
 #define STAGE_H
 
 #include <string>
+#include <vector>
 
 class Type;
 class Node;
@@ -13,8 +14,7 @@ public:
     Stage() {}
     virtual ~Stage() {}
 
-    virtual int typeSize(const Type &t) = 0;
-    virtual bool isFunctionDefined(const std::string &name) const = 0;
+    virtual bool isFunctionDefined(const std::string &name, const std::vector<Type> &args) const = 0;
 
     enum class InjectScope {
         Local,
